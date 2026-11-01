@@ -127,6 +127,7 @@ model User {
   qrScans          QrScan[]
   disputesOpened   Dispute[]
   approvals        Decision[]
+  notifications    Notification[]
 
   @@map("users")
 }
@@ -191,6 +192,7 @@ model Order {
   qrScans       QrScan[]
   messages      ChatMessage[]
   dispute       Dispute?
+  notifications Notification[]
 
   @@index([state, handoffDeadline]) // void sweeper
   @@index([state, authorizationExpiresAt]) // reauthorize sweeper
@@ -356,6 +358,27 @@ model ChatMessage {
   @@index([orderId])
   @@index([senderId, recipientId])
   @@map("chat_messages")
+}
+
+// Messages to a user about one of their orders (e.g. "voided: no handoff in
+// 72 hours"). Written in the same DB transaction as the state change; one per
+// user, order and kind, so a retried job doesn't notify twice.
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  orderId   String?   @map("order_id") @db.Uuid
+  kind      String // ORDER_VOIDED, ...
+  message   String
+  readAt    DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user  User   @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@unique([userId, orderId, kind])
+  @@index([userId, createdAt])
+  @@index([orderId])
+  @@map("notifications")
 }
 
 model Dispute {

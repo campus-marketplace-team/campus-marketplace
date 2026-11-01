@@ -107,7 +107,7 @@ Goal: buyer pays, money is held, QR scan at handoff captures it, and the ledger 
 ## Phase 3 — Reliability (Oct 26–Nov 1)
 Goal: webhooks, deadlines, payouts and retries all run without anyone clicking anything.
 
-- [ ] **3.1 Worker + deadline job**
+- [x] **3.1 Worker + deadline job** (job in server/src/jobs/handoffDeadline.ts, exported to the worker as `server/jobs`; pg-boss setup in worker/src/index.ts, sweep every minute; tests in server/test/handoffDeadline.test.ts. Migration 20261101120000_add_notifications (notifications table, RLS on), applied. Worker env: DATABASE_URL + PAYPAL_*; new optional DATABASE_POOL_MAX (worker forces 2, pg-boss max 2). Server tests now run with --maxWorkers=3. Worker hosting not decided yet.)
   > Read CLAUDE.md. Set up pg-boss in worker/. Add a deadline job that finds AUTHORIZED orders past their 72-hour deadline, voids them through PayPal, moves them to VOIDED via the state machine, and notifies both sides (a notification record is fine). When done, tick task 3.1 in TASKS.md.
 
 - [ ] **3.2 Transactional outbox**

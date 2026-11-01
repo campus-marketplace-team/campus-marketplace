@@ -74,7 +74,7 @@ export async function login(api: Api, email: string): Promise<string> {
   return res.body.token;
 }
 
-/** Deletes this file's test users (and stale ones) with the orders, QR tokens and scans, listings and messages that reference them. */
+/** Deletes this file's test users (and stale ones) with the orders, QR tokens and scans, notifications, listings and messages that reference them. */
 export async function cleanup() {
   const users = await prisma.user.findMany({
     where: {
@@ -96,6 +96,7 @@ export async function cleanup() {
       // QR scans and tokens reference orders and users, so they go first.
       prisma.qrScan.deleteMany({ where: { OR: [{ scannerId: { in: ids } }, { order: orders }] } }),
       prisma.qrToken.deleteMany({ where: { OR: [{ sellerId: { in: ids } }, { usedById: { in: ids } }, { order: orders }] } }),
+      prisma.notification.deleteMany({ where: { OR: [{ userId: { in: ids } }, { order: orders }] } }),
       prisma.order.deleteMany({ where: orders }),
       prisma.listing.deleteMany({ where: listings }),
       prisma.user.deleteMany({ where: { id: { in: ids } } }),
