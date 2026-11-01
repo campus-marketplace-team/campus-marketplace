@@ -9,7 +9,7 @@ Team: Hassan and Abubakr. Tasks aren't assigned to either person; whoever picks 
 - API: Express + TypeScript
 - Worker: pg-boss (job queue inside Postgres, no Redis)
 - DB: Postgres on Supabase with Prisma — `server/prisma/schema.prisma` is the source of truth
-- Hosting: API on Render/Railway, web on Vercel
+- Hosting: web on Vercel, API on Render (free plan); both auto-deploy from `main`. URLs and rules under **Deployed app** below; setup in `DEPLOY.md`
 - Monorepo (npm workspaces): `client/` (web), `server/` (API), `worker/`, `shared/` (types shared by all three, imported as `@campus/shared`)
 - Auth: JWT sent as `Authorization: Bearer <token>`; protect API routes with `requireAuth` / `requireAdmin` from `server/src/auth/middleware.ts`
 
@@ -104,6 +104,24 @@ users, listings, orders, ledger_entries, webhook_events, outbox, decisions, qr_t
 5. Ship (Nov 8–12): chaos buttons, demo video, Devpost write-up
 
 A phase is done only when its "Done when" check passes on the **deployed** app. Don't start next-phase tasks early. Fallback if behind by Nov 7: cut dispute escalation and reconciliation first.
+
+## Deployed app
+- Web: https://campus-marketplace-five-delta.vercel.app (Vercel)
+- API: https://campus-marketplace-api-ia11.onrender.com (Render). Health check: `GET /api/health` → `{"ok":true}`
+- If either URL changes, update it here, in `DEPLOY.md`, and in Render's `CORS_ORIGINS`.
+- Every push to `main` redeploys both. Only merge code that builds and passes `npm test`.
+- Production uses the **same Supabase database** as local dev, and deploys don't run migrations. Apply a new migration with `npm run migrate:deploy -w server` before merging it.
+- The Vercel and Render dashboards (env vars, logs) are on Abubakr's account; Claude Code can't see them. For a new env var, add the name to `.env.example` and tell the developer, who adds it on Render (API) or Vercel (`VITE_*` only, then a redeploy, since they're baked in at build time).
+- Render's free plan sleeps after ~15 min idle; the first request after that can take ~1 min.
+- No email provider yet: sign-up verification links appear only in the Render logs. Test with seed accounts instead, e.g. `seed.alex.chen@mcmaster.ca` / `password123` (sandbox test data, not a secret).
+
+### Testing against the deployed app
+- Deployed checks live in a separate smoke suite with its own script (e.g. `npm run test:smoke -w server`), never in `npm test`, which must keep running against the local setup.
+- Read the base URLs from `SMOKE_API_URL` / `SMOKE_WEB_URL`, defaulting to the URLs above (they aren't secrets).
+- Wake the API first: call `/api/health` with a timeout of at least 90 s before anything else.
+- The database is shared, so smoke tests must not leave data behind: read-only requests plus seed-user login only. No sign-ups, new listings, chat messages, orders or checkout (an order reserves a real listing for everyone). If a check truly needs a write, ask first and plan its cleanup.
+- Good checks: health; `GET /api/listings` returns the seeded listings; seed-user login, then an authed request with the token succeeds and one without it gets 401; CORS (a request with `Origin: https://campus-marketplace-five-delta.vercel.app` gets that value back in `Access-Control-Allow-Origin`, and an unknown origin doesn't); the web URL and a client-side route other than `/` both return the app's HTML.
+- If a deployed check fails, don't change code or weaken a check to make it pass. Report which check failed and what to look at (Render logs, an env var, a missing migration, a cold start).
 
 ## Working rules for Claude Code
 - **Never run `git commit`, `git push`, or create PRs.** The developer commits themselves. When a task is done, stop and summarize what changed so they can review and commit.
