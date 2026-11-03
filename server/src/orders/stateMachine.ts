@@ -1,11 +1,15 @@
 import { isLegalTransition, type OrderState } from "@campus/shared";
-import type { Db } from "../db.js";
+import { type Db, prisma } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { isUuid } from "../ids.js";
+import { ORDER_STATE_CHANGED, type OrderStateChangedPayload } from "../outbox/handlers.js";
+import { enqueueOutbox } from "../outbox/outbox.js";
 
 // The only way an order's state changes (see CLAUDE.md "Order state machine").
 // Callers pass a Prisma transaction client so the state change commits or
-// rolls back together with their ledger entries and outbox row.
+// rolls back together with their ledger entries. Every successful transition
+// also writes an `order.state_changed` outbox row in that same transaction,
+// which the worker's relay turns into side effects (see src/outbox/).
 
 export type TransitionResult = { orderId: string; state: OrderState; version: number };
 
@@ -74,6 +78,12 @@ export async function transition(
     throw new TypeError(`expectedVersion must be a non-negative integer, got ${expectedVersion}`);
   }
 
+  // Given the root client, open a transaction so the update and its outbox row still commit together.
+  // (Compared by identity: at runtime a transaction client also has a $transaction method.)
+  if (db === prisma) {
+    return prisma.$transaction((tx) => transition(tx, orderId, from, to, expectedVersion, data));
+  }
+
   // Drop the reserved keys at runtime too, in case an untyped caller sends them.
   const { id: _id, state: _state, version: _version, ...extra } = data as Prisma.OrderUpdateManyMutationInput;
 
@@ -81,7 +91,12 @@ export async function transition(
     where: { id: orderId, state: from, version: expectedVersion },
     data: { ...extra, state: to, version: { increment: 1 } },
   });
-  if (count === 1) return { orderId, state: to, version: expectedVersion + 1 };
+  if (count === 1) {
+    const version = expectedVersion + 1;
+    const payload: OrderStateChangedPayload = { from, to, version };
+    await enqueueOutbox(db, { topic: ORDER_STATE_CHANGED, orderId, payload });
+    return { orderId, state: to, version };
+  }
 
   // Lost the race (or the caller's view was stale). Read only to explain why.
   const current = await db.order.findUnique({ where: { id: orderId }, select: { state: true, version: true } });

@@ -110,7 +110,7 @@ Goal: webhooks, deadlines, payouts and retries all run without anyone clicking a
 - [x] **3.1 Worker + deadline job** (job in server/src/jobs/handoffDeadline.ts, exported to the worker as `server/jobs`; pg-boss setup in worker/src/index.ts, sweep every minute; tests in server/test/handoffDeadline.test.ts. Migration 20261101120000_add_notifications (notifications table, RLS on), applied. Worker env: DATABASE_URL + PAYPAL_*; new optional DATABASE_POOL_MAX (worker forces 2, pg-boss max 2). Server tests now run with --maxWorkers=3. Worker hosting not decided yet.)
   > Read CLAUDE.md. Set up pg-boss in worker/. Add a deadline job that finds AUTHORIZED orders past their 72-hour deadline, voids them through PayPal, moves them to VOIDED via the state machine, and notifies both sides (a notification record is fine). When done, tick task 3.1 in TASKS.md.
 
-- [ ] **3.2 Transactional outbox**
+- [x] **3.2 Transactional outbox** (server/src/outbox/outbox.ts: enqueue, SKIP LOCKED claim with 5-min lease, backoff 30s·2^n, DEAD after 5; server/src/outbox/handlers.ts: `order.state_changed` → buyer/seller notifications. transition() writes that row in the same transaction. Worker polls the relay every 5 s. Tests in server/test/outbox.test.ts. No migration (existing outbox table), no new env vars.)
   > Read CLAUDE.md. Implement the transactional outbox: state changes write an outbox row in the same transaction. The worker reads with FOR UPDATE SKIP LOCKED, sends the side effect, retries with exponential backoff, and moves it to a dead-letter status after 5 failures. When done, tick task 3.2 in TASKS.md.
 
 - [ ] **3.3 Webhook ingestor**
