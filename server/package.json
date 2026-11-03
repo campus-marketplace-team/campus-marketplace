@@ -19,6 +19,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "paypal:token": "tsx scripts/paypal-token.ts",
     "storage:setup": "tsx scripts/storage-setup.ts",
+    "webhooks:replay": "tsx scripts/webhooks-replay.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "keywords": [],

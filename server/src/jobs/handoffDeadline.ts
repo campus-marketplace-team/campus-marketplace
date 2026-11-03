@@ -65,10 +65,11 @@ function cutoff(now: Date) {
 
 /**
  * The DB half of voiding, in the caller's transaction: AUTHORIZED → VOIDED,
- * listing back on sale, escrow returned to the buyer, both sides notified.
+ * listing back on sale, escrow returned to the buyer, both sides notified
+ * (unless `notify` is false). Also used for PAYMENT.AUTHORIZATION.VOIDED webhooks.
  * Throws StaleOrderError (rolling it all back) if the order moved first.
  */
-export async function recordVoid(tx: Db, order: OverdueOrder, now: Date) {
+export async function recordVoid(tx: Db, order: OverdueOrder, now: Date, { notify = true } = {}) {
   await transition(tx, order.id, "AUTHORIZED", "VOIDED", order.version);
 
   // The item wasn't handed over, so it's for sale again.
@@ -83,6 +84,9 @@ export async function recordVoid(tx: Db, order: OverdueOrder, now: Date) {
     { kind: "VOID", orderId: order.id, paypalRef: order.paypalAuthorizationId },
   );
 
+  // notify: false when the void wasn't about the deadline (e.g. PayPal voided it); the
+  // outbox's order.state_changed handler then sends its generic "cancelled" message.
+  if (!notify) return;
   await tx.notification.createMany({
     data: [
       {

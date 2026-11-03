@@ -1,8 +1,8 @@
-import { isUuid } from "../ids.js";
 import { LEGAL_TRANSITIONS, type OrderState } from "@campus/shared";
-import { prisma } from "../db.js";
+import { type Db, prisma } from "../db.js";
+import { isUuid } from "../ids.js";
 import type { OutboxEvent } from "../outbox/outbox.js";
-import type { PayPalWebhookJob } from "./ingest.js";
+import { webhookEventHandlers } from "./handlers.js";
 
 // Processing a stored PayPal webhook event (outbox topic paypal.webhook, run
 // by the worker's relay). Webhooks arrive late, twice and out of order, so:
@@ -11,7 +11,7 @@ import type { PayPalWebhookJob } from "./ingest.js";
 //     DB write may not have committed yet), and dead-lettered after 5 tries;
 //   - a stale event, whose order is already at or past the state the event
 //     would move it to, is logged and dropped;
-//   - anything else goes to the handler for its event type (task 3.4).
+//   - anything else goes to the handler for its event type (src/webhooks/handlers.ts).
 // processed_at is set once an event is finished (handled, ignored or dropped);
 // process_error says why it was ignored or dropped.
 //
@@ -36,37 +36,61 @@ export const WEBHOOK_TARGET_STATE: Readonly<Record<string, OrderState | null>> =
   "PAYMENT.PAYOUTS-ITEM.UNCLAIMED": null,
   "PAYMENT.PAYOUTS-ITEM.REFUNDED": null,
   "PAYMENT.PAYOUTS-ITEM.CANCELED": null,
-  "CUSTOMER.DISPUTE.CREATED": "IN_DISPUTE",
+  // Not IN_DISPUTE: PayPal disputes are usually on captured orders, which the
+  // state machine can't move to IN_DISPUTE. The handler flags those for review
+  // instead of the stale check silently dropping them.
+  "CUSTOMER.DISPUTE.CREATED": null,
   "CUSTOMER.DISPUTE.UPDATED": null,
   "CUSTOMER.DISPUTE.RESOLVED": null,
 };
 
 export type WebhookOrder = {
   id: string;
+  listingId: string;
+  buyerId: string;
+  sellerId: string;
   state: OrderState;
   version: number;
+  amountCents: number;
+  platformFeeCents: number;
+  currency: string;
   paypalOrderId: string | null;
   paypalAuthorizationId: string | null;
   paypalCaptureId: string | null;
+  paypalPayoutItemId: string | null;
 };
 
 export type StoredWebhookEvent = { id: string; eventId: string; eventType: string; payload: unknown };
 
-/** Applies one non-stale event to its order (task 3.4). Must be idempotent: it may run again after a crash. */
-export type WebhookEventHandler = (input: { event: StoredWebhookEvent; order: WebhookOrder }) => Promise<void>;
-
-/** Handlers by event type. Empty until task 3.4. */
-export const webhookEventHandlers: Readonly<Record<string, WebhookEventHandler>> = {};
+/**
+ * Applies one non-stale event to its order (src/webhooks/handlers.ts). Runs in
+ * `tx`, the same transaction that marks the event processed, so a crash can't
+ * apply it twice. Returns a note for process_error (e.g. "needs review: ..."),
+ * or nothing. Throws to have the relay retry (e.g. a race that will settle).
+ */
+export type WebhookEventHandler = (input: {
+  event: StoredWebhookEvent;
+  order: WebhookOrder;
+  tx: Db;
+  now: Date;
+}) => Promise<string | null | void>;
 
 export type ProcessOutcome = "handled" | "stale" | "ignored" | "unhandled" | "already_processed";
 
 const orderSelect = {
   id: true,
+  listingId: true,
+  buyerId: true,
+  sellerId: true,
   state: true,
   version: true,
+  amountCents: true,
+  platformFeeCents: true,
+  currency: true,
   paypalOrderId: true,
   paypalAuthorizationId: true,
   paypalCaptureId: true,
+  paypalPayoutItemId: true,
 } as const;
 
 /** true if `to` can be reached from `from` by one or more legal transitions. */
@@ -161,6 +185,8 @@ export async function findOrderForEvent(eventType: string, payload: unknown): Pr
   return null;
 }
 
+class AlreadyProcessed extends Error {}
+
 async function finish(webhookEventId: string, note: string | null) {
   await prisma.webhookEvent.updateMany({
     where: { id: webhookEventId, processedAt: null },
@@ -212,8 +238,24 @@ export async function processWebhookEvent(
     return "unhandled";
   }
 
-  await handler({ event, order });
-  await finish(event.id, null);
+  const now = new Date();
+  let note: string | null;
+  try {
+    note = await prisma.$transaction(async (tx) => {
+      const result = (await handler({ event, order, tx, now })) ?? null;
+      const { count } = await tx.webhookEvent.updateMany({
+        where: { id: event.id, processedAt: null },
+        data: { processedAt: now, processError: result },
+      });
+      // Another run finished it first: roll this one back so nothing is applied twice.
+      if (count === 0) throw new AlreadyProcessed();
+      return result;
+    });
+  } catch (err) {
+    if (err instanceof AlreadyProcessed) return "already_processed";
+    throw err;
+  }
+  if (note) console.log(`${label}: ${note} (order ${order.id})`);
   return "handled";
 }
 

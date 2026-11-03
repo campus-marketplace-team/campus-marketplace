@@ -118,3 +118,29 @@ export async function ingestPayPalWebhook(
   if (!inserted) console.log(`webhook ${eventId} (${eventType}): duplicate delivery, ignored`);
   return { status: 200, body: { received: true, duplicate: !inserted } };
 }
+
+/**
+ * Stored events that were never finished (processed_at null, e.g. left
+ * "no handler" before their handler existed) and have no outbox row waiting.
+ * With `apply`, queues each of them again. Returns their ids.
+ */
+export async function requeueUnprocessedWebhookEvents({ apply = false } = {}) {
+  const unprocessed = await prisma.webhookEvent.findMany({
+    where: { processedAt: null },
+    orderBy: { receivedAt: "asc" },
+    select: { id: true },
+  });
+  const waiting = await prisma.outboxEvent.findMany({
+    where: { topic: PAYPAL_WEBHOOK_TOPIC, status: { in: ["PENDING", "PROCESSING"] } },
+    select: { payload: true },
+  });
+  const queued = new Set(waiting.map((w) => (w.payload as Partial<PayPalWebhookJob> | null)?.webhookEventId));
+  const ids = unprocessed.map((e) => e.id).filter((id) => !queued.has(id));
+  if (apply) {
+    for (const id of ids) {
+      const job: PayPalWebhookJob = { webhookEventId: id };
+      await enqueueOutbox(prisma, { topic: PAYPAL_WEBHOOK_TOPIC, payload: job });
+    }
+  }
+  return ids;
+}
