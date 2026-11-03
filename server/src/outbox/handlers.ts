@@ -1,5 +1,7 @@
 import { isOrderState, type OrderState } from "@campus/shared";
 import { prisma } from "../db.js";
+import { PAYPAL_WEBHOOK_TOPIC } from "../webhooks/ingest.js";
+import { handlePayPalWebhookJob } from "../webhooks/process.js";
 import type { OutboxEvent, OutboxHandlers } from "./outbox.js";
 
 // Side effects the worker's outbox relay delivers, by topic. Each runs at
@@ -67,4 +69,5 @@ export async function notifyOrderStateChanged(event: OutboxEvent) {
 
 export const outboxHandlers: OutboxHandlers = {
   [ORDER_STATE_CHANGED]: notifyOrderStateChanged,
+  [PAYPAL_WEBHOOK_TOPIC]: handlePayPalWebhookJob,
 };

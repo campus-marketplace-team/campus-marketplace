@@ -108,6 +108,15 @@ export type Authorization = {
 
 export type Capture = { captureId: string; status: string; amountCents: number; currency: string };
 
+/** The PAYPAL-* headers of a webhook delivery, which PayPal's verify endpoint checks. */
+export type WebhookSignatureHeaders = {
+  authAlgo: string;
+  certUrl: string;
+  transmissionId: string;
+  transmissionSig: string;
+  transmissionTime: string;
+};
+
 export type PayPalClient = ReturnType<typeof createPayPalClient>;
 
 type Fetch = typeof fetch;
@@ -307,6 +316,67 @@ export function createPayPalClient(
       );
       if (typeof json?.id !== "string") invalid("capture", "response had no capture id");
       return { captureId: json.id, status: String(json.status), ...parseAmount("capture", json.amount) };
+    },
+
+    /**
+     * POST /v1/notifications/verify-webhook-signature. `rawEvent` is the
+     * webhook request body exactly as received: it's embedded byte for byte,
+     * because re-serializing parsed JSON can change it and fail verification.
+     * The caller must have checked it parses as a JSON object. Not a money
+     * call, so no PayPal-Request-Id. Returns PayPal's verification_status;
+     * only "SUCCESS" means the event is genuine.
+     */
+    async verifyWebhookSignature(input: {
+      webhookId: string;
+      headers: WebhookSignatureHeaders;
+      rawEvent: string;
+    }): Promise<{ verificationStatus: string }> {
+      const action = "verify-webhook";
+      const h = input.headers;
+      const fields = JSON.stringify({
+        auth_algo: h.authAlgo,
+        cert_url: h.certUrl,
+        transmission_id: h.transmissionId,
+        transmission_sig: h.transmissionSig,
+        transmission_time: h.transmissionTime,
+        webhook_id: input.webhookId,
+      });
+      const body = `${fields.slice(0, -1)},"webhook_event":${input.rawEvent}}`;
+
+      const attempt = async () =>
+        send(
+          action,
+          `${config.baseUrl}/v1/notifications/verify-webhook-signature`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${await accessToken()}`,
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body,
+          },
+          timeoutMs,
+        );
+      let res = await attempt();
+      if (res.status === 401) {
+        token = null;
+        res = await attempt();
+      }
+      const json = (await res.json().catch(() => null)) as
+        | { verification_status?: unknown; name?: string; debug_id?: string; message?: string }
+        | null;
+      if (!res.ok) {
+        throw new PayPalError(action, "http", [`HTTP ${res.status}`, json?.name, json?.message].filter(Boolean).join(" "), {
+          status: res.status,
+          paypalName: json?.name,
+          debugId: json?.debug_id ?? res.headers.get("paypal-debug-id") ?? undefined,
+        });
+      }
+      if (typeof json?.verification_status !== "string") {
+        throw new PayPalError(action, "invalid_response", "response had no verification_status");
+      }
+      return { verificationStatus: json.verification_status };
     },
 
     /** POST /v2/payments/authorizations/{id}/void. The buyer is never charged. */

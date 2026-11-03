@@ -113,7 +113,7 @@ Goal: webhooks, deadlines, payouts and retries all run without anyone clicking a
 - [x] **3.2 Transactional outbox** (server/src/outbox/outbox.ts: enqueue, SKIP LOCKED claim with 5-min lease, backoff 30s·2^n, DEAD after 5; server/src/outbox/handlers.ts: `order.state_changed` → buyer/seller notifications. transition() writes that row in the same transaction. Worker polls the relay every 5 s. Tests in server/test/outbox.test.ts. No migration (existing outbox table), no new env vars.)
   > Read CLAUDE.md. Implement the transactional outbox: state changes write an outbox row in the same transaction. The worker reads with FOR UPDATE SKIP LOCKED, sends the side effect, retries with exponential backoff, and moves it to a dead-letter status after 5 failures. When done, tick task 3.2 in TASKS.md.
 
-- [ ] **3.3 Webhook ingestor**
+- [x] **3.3 Webhook ingestor** (POST /api/webhooks/paypal in server/src/routes/webhooks.ts + server/src/webhooks/ingest.ts: verify via PayPal with the raw body, ON CONFLICT DO NOTHING insert + `paypal.webhook` outbox row in one transaction. Worker side in server/src/webhooks/process.ts: order lookup, stale events logged and dropped, handlers left for 3.4 (unhandled events stay processed_at null for replay). Tests in server/test/webhooks.test.ts. New env var PAYPAL_WEBHOOK_ID (Render). Webhook URL must be registered on the PayPal sandbox app. server/vitest.config.ts caps the test DB pool at 4. No migration.)
   > Read CLAUDE.md. Build the PayPal webhook endpoint: verify the signature using PayPal's verification endpoint, insert into webhook_events with ON CONFLICT DO NOTHING on event_id, queue for processing, and log and drop stale events. When done, tick task 3.3 in TASKS.md.
 
 - [ ] **3.4 Webhook event handlers**

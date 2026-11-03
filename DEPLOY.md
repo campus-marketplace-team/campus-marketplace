@@ -51,6 +51,7 @@ The build installs all workspaces (which also builds `shared/`), then runs `pris
 | `PAYPAL_CLIENT_ID` | Sandbox app client ID | Yes |
 | `PAYPAL_CLIENT_SECRET` | Sandbox app secret | Yes |
 | `PAYPAL_BASE_URL` | `https://api-m.sandbox.paypal.com` | No |
+| `PAYPAL_WEBHOOK_ID` | Webhook ID PayPal shows after you add `https://campus-marketplace-api-ia11.onrender.com/api/webhooks/paypal` under the sandbox app → Webhooks (subscribe to the events listed in CLAUDE.md). Without it the webhook endpoint answers 503 | No |
 | `CORS_ORIGINS` | `https://campus-marketplace-five-delta.vercel.app` exactly (comma-separate several; **no trailing slash**) | No |
 | `JWT_SECRET` | Long random string, at least 32 characters. Generate a new one for production; don't reuse your local one | Yes |
 | `ALLOWED_EMAIL_DOMAINS` | School domains allowed to sign up, e.g. `mcmaster.ca` (comma-separated; subdomains allowed) | No |

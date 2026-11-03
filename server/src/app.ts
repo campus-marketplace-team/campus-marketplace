@@ -4,6 +4,7 @@ import { authRouter } from "./routes/auth.js";
 import { chatRouter } from "./routes/chat.js";
 import { listingsRouter } from "./routes/listings.js";
 import { createOrdersRouter } from "./routes/orders.js";
+import { createWebhooksRouter } from "./routes/webhooks.js";
 
 // Origins allowed to call the API from a browser, e.g. the Vercel URL.
 // Comma-separated in CORS_ORIGINS. Empty in local dev, where Vite proxies /api.
@@ -50,6 +51,8 @@ export function createApp({ paypal = getPayPalClient }: { paypal?: () => PayPalC
     .filter(Boolean);
 
   app.use(cors(allowedOrigins));
+  // Before express.json(): signature verification needs the raw body.
+  app.use("/api/webhooks", createWebhooksRouter(paypal));
   app.use(express.json());
 
   // Cheap liveness check for the host's health checks; does not touch the DB.
