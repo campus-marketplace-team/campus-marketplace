@@ -1,4 +1,4 @@
-import { AUTHORIZATION_VALID_DAYS, HANDOFF_WINDOW_MS, platformFeeCents } from "@campus/shared";
+import { AUTHORIZATION_VALID_DAYS, HANDOFF_WINDOW_MS, HONOR_PERIOD_MS, platformFeeCents } from "@campus/shared";
 import { type Db, prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import { postTransaction } from "../ledger/postTransaction.js";
@@ -142,6 +142,7 @@ export async function recordAuthorization(
     paypalAuthorizationId: authorization.authorizationId,
     authorizedAt: now,
     handoffDeadline: new Date(now.getTime() + HANDOFF_WINDOW_MS),
+    honorPeriodEndsAt: new Date(now.getTime() + HONOR_PERIOD_MS),
     authorizationExpiresAt:
       authorization.expiresAt ?? new Date(now.getTime() + AUTHORIZATION_VALID_DAYS * 24 * 60 * 60 * 1000),
   });

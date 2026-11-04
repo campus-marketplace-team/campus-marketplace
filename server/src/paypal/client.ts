@@ -86,12 +86,21 @@ export function valueToCents(value: string): number {
 // ---------- Request ids ----------
 
 /** `payout-<n>` is attempt n of the seller payout (each attempt has its own sender_batch_id). */
-export type PayPalAction = "create-order" | "authorize" | "capture" | "void" | `payout-${number}`;
+export type PayPalAction =
+  | "create-order"
+  | "authorize"
+  | "capture"
+  | "void"
+  | `payout-${number}`
+  /** Keyed by the authorization being replaced, so each reauthorization has its own request id. */
+  | `reauthorize-${string}`;
 
 /** PayPal-Request-Id for one action on one of our orders (max 108 chars; ours is 36 + action). */
 export function requestId(orderId: string, action: PayPalAction): string {
   if (!isUuid(orderId)) throw new TypeError(`orderId must be a UUID, got ${orderId}`);
-  return `${orderId}-${action}`;
+  const id = `${orderId}-${action}`;
+  if (id.length > 108) throw new RangeError(`PayPal-Request-Id would be ${id.length} characters (max 108)`);
+  return id;
 }
 
 // ---------- Results ----------
@@ -481,6 +490,31 @@ export function createPayPalClient(
             },
           ];
         }),
+      };
+    },
+
+    /**
+     * POST /v2/payments/authorizations/{id}/reauthorize, for the original
+     * amount. Only allowed after the 3-day honor period (else 422
+     * REAUTHORIZATION_TOO_SOON). Returns a NEW authorization, with a new
+     * honor period, that later captures must use.
+     */
+    async reauthorize(input: { orderId: string; authorizationId: string }): Promise<Authorization> {
+      const action = `reauthorize-${input.authorizationId}` as const;
+      const { json } = await call(
+        action,
+        input.orderId,
+        `/v2/payments/authorizations/${encodeURIComponent(input.authorizationId)}/reauthorize`,
+        {},
+      );
+      if (typeof json?.id !== "string") invalid(action, "response had no authorization id");
+      if (json.id === input.authorizationId) invalid(action, "response returned the same authorization id");
+      const expiresAt = typeof json.expiration_time === "string" ? new Date(json.expiration_time) : null;
+      return {
+        authorizationId: json.id,
+        status: String(json.status),
+        ...parseAmount(action, json.amount),
+        expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
       };
     },
 

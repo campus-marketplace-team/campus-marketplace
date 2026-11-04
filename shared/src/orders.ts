@@ -11,6 +11,9 @@ export const HANDOFF_TOKEN_TTL_SECONDS = 5 * 60;
 /** PayPal authorizations expire 29 days after they're made. */
 export const AUTHORIZATION_VALID_DAYS = 29;
 
+/** PayPal's honor period: capture inside it. Reauthorizing is only allowed after it, and starts a new one. */
+export const HONOR_PERIOD_MS = 3 * 24 * 60 * 60 * 1000;
+
 /** Platform fee in basis points (1000 = 10%), kept back from the seller's payout. */
 export const PLATFORM_FEE_BPS = 1000;
 

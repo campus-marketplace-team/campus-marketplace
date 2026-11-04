@@ -39,7 +39,7 @@ export type VoidOutcome =
 
 export type SweepResult = { checked: number } & Record<VoidOutcome, number>;
 
-type OverdueOrder = {
+export type OverdueOrder = {
   id: string;
   listingId: string;
   buyerId: string;
@@ -66,10 +66,16 @@ function cutoff(now: Date) {
 /**
  * The DB half of voiding, in the caller's transaction: AUTHORIZED → VOIDED,
  * listing back on sale, escrow returned to the buyer, both sides notified
- * (unless `notify` is false). Also used for PAYMENT.AUTHORIZATION.VOIDED webhooks.
+ * (unless `notify` is false; pass messages to replace the 72-hour wording).
+ * Also used for PAYMENT.AUTHORIZATION.VOIDED webhooks and expiring authorizations.
  * Throws StaleOrderError (rolling it all back) if the order moved first.
  */
-export async function recordVoid(tx: Db, order: OverdueOrder, now: Date, { notify = true } = {}) {
+export async function recordVoid(
+  tx: Db,
+  order: OverdueOrder,
+  now: Date,
+  { notify = true }: { notify?: boolean | { buyer: string; seller: string } } = {},
+) {
   await transition(tx, order.id, "AUTHORIZED", "VOIDED", order.version);
 
   // The item wasn't handed over, so it's for sale again.
@@ -87,22 +93,17 @@ export async function recordVoid(tx: Db, order: OverdueOrder, now: Date, { notif
   // notify: false when the void wasn't about the deadline (e.g. PayPal voided it); the
   // outbox's order.state_changed handler then sends its generic "cancelled" message.
   if (!notify) return;
+  const messages =
+    notify === true
+      ? {
+          buyer: "Your order was cancelled because the handoff didn't happen within 72 hours. You haven't been charged.",
+          seller: "An order was cancelled because the handoff didn't happen within 72 hours. Your listing is back on sale.",
+        }
+      : notify;
   await tx.notification.createMany({
     data: [
-      {
-        userId: order.buyerId,
-        orderId: order.id,
-        kind: ORDER_VOIDED_NOTIFICATION,
-        message: "Your order was cancelled because the handoff didn't happen within 72 hours. You haven't been charged.",
-        createdAt: now,
-      },
-      {
-        userId: order.sellerId,
-        orderId: order.id,
-        kind: ORDER_VOIDED_NOTIFICATION,
-        message: "An order was cancelled because the handoff didn't happen within 72 hours. Your listing is back on sale.",
-        createdAt: now,
-      },
+      { userId: order.buyerId, orderId: order.id, kind: ORDER_VOIDED_NOTIFICATION, message: messages.buyer, createdAt: now },
+      { userId: order.sellerId, orderId: order.id, kind: ORDER_VOIDED_NOTIFICATION, message: messages.seller, createdAt: now },
     ],
     skipDuplicates: true,
   });
@@ -116,6 +117,22 @@ export async function voidOverdueOrder(paypal: PayPalClient, orderId: string, no
     select: overdueOrderSelect,
   });
   if (!order) return "skipped";
+  const outcome = await voidAndRecord(paypal, order, now);
+  if (outcome === "voided") console.log(`Order ${order.id}: handoff deadline passed, voided`);
+  return outcome;
+}
+
+/**
+ * Voids an AUTHORIZED order's authorization at PayPal (request id
+ * `<orderId>-void`, so a retry gets the first answer), then records it with
+ * recordVoid. Never voids money PayPal says was captured.
+ */
+export async function voidAndRecord(
+  paypal: PayPalClient,
+  order: OverdueOrder,
+  now: Date,
+  notify: Parameters<typeof recordVoid>[3] = {},
+): Promise<VoidOutcome> {
   if (!order.paypalAuthorizationId) {
     console.error(`Order ${order.id}: AUTHORIZED with no authorization id, can't void`);
     return "failed";
@@ -130,7 +147,7 @@ export async function voidOverdueOrder(paypal: PayPalClient, orderId: string, no
     }
     const detail = `${err.message}${err.debugId ? ` (debug id ${err.debugId})` : ""}`;
     if (err.status === 422 && err.issue && ALREADY_CAPTURED.has(err.issue)) {
-      console.error(`Order ${order.id}: past its deadline but already captured at PayPal; not voiding. ${detail}`);
+      console.error(`Order ${order.id}: already captured at PayPal; not voiding. ${detail}`);
       return "captured";
     }
     if (!(err.status === 422 && err.issue && ALREADY_VOID.has(err.issue))) {
@@ -141,7 +158,7 @@ export async function voidOverdueOrder(paypal: PayPalClient, orderId: string, no
   }
 
   try {
-    await prisma.$transaction((tx) => recordVoid(tx, order, now));
+    await prisma.$transaction((tx) => recordVoid(tx, order, now, notify));
   } catch (err) {
     if (err instanceof StaleOrderError) {
       if (err.actual.state === "VOIDED") return "skipped"; // a concurrent run recorded it
@@ -151,7 +168,6 @@ export async function voidOverdueOrder(paypal: PayPalClient, orderId: string, no
     console.error(`Order ${order.id}: voided at PayPal, but recording it failed:`, (err as Error).message);
     return "failed";
   }
-  console.log(`Order ${order.id}: handoff deadline passed, voided`);
   return "voided";
 }
 
