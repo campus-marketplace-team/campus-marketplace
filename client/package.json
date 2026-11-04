@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@campus/shared": "*",
+    "ag-grid-community": "36.2.0",
+    "ag-grid-react": "36.2.0",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",

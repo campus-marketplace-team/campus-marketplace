@@ -11,6 +11,9 @@ const navItems = [
 
 /** Shell shared by every page: header + nav on top, routed page below. */
 export function AppLayout() {
+  const auth = useAuth()
+  const items =
+    auth.status === 'authenticated' && auth.user.isAdmin ? [...navItems, { to: '/admin', label: 'Admin' }] : navItems
   return (
     <div className="app">
       <header className="app-header">
@@ -22,7 +25,7 @@ export function AppLayout() {
             Campus Marketplace
           </Link>
           <nav className="app-nav" aria-label="Main">
-            {navItems.map((item) => (
+            {items.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

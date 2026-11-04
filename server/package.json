@@ -20,6 +20,7 @@
     "paypal:token": "tsx scripts/paypal-token.ts",
     "storage:setup": "tsx scripts/storage-setup.ts",
     "webhooks:replay": "tsx scripts/webhooks-replay.ts",
+    "admin:grant": "tsx scripts/grant-admin.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "keywords": [],

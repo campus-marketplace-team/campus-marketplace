@@ -1,5 +1,5 @@
 import { createBrowserRouter } from 'react-router'
-import { RedirectIfAuthenticated, RequireAuth } from './auth/RequireAuth'
+import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './auth/RequireAuth'
 import { AppLayout } from './layout/AppLayout'
 import { LoginPage } from './pages/auth/LoginPage'
 import { SignupPage } from './pages/auth/SignupPage'
@@ -29,6 +29,16 @@ export const router = createBrowserRouter([
           { path: '/orders/:orderId', element: <OrderStatusPage /> },
           { path: '/orders/:orderId/handoff', element: <HandoffQrPage /> },
           { path: '/scan', element: <ScanPage /> },
+          {
+            element: <RequireAdmin />,
+            // Lazy so AG Grid only downloads for admins who open the dashboard.
+            children: [
+              {
+                path: '/admin',
+                lazy: async () => ({ Component: (await import('./pages/admin/AdminDashboardPage')).AdminDashboardPage }),
+              },
+            ],
+          },
         ],
       },
       {

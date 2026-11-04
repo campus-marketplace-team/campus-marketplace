@@ -21,6 +21,25 @@ export function RequireAuth() {
   return <Outlet />
 }
 
+/**
+ * Route guard for admin pages, nested inside RequireAuth. The API enforces
+ * admin access too (requireAdmin); this only avoids showing a page that
+ * would fail to load.
+ */
+export function RequireAdmin() {
+  const auth = useAuth()
+  if (auth.status !== 'authenticated') return null // RequireAuth handles loading and logged-out users
+  if (!auth.user.isAdmin) {
+    return (
+      <div className="page">
+        <h1>Admins only</h1>
+        <p className="text-muted">This page is for marketplace admins.</p>
+      </div>
+    )
+  }
+  return <Outlet />
+}
+
 /** For /login and /signup: logged-in users are sent on (back to where they were headed, or home). */
 export function RedirectIfAuthenticated() {
   const { status } = useAuth()

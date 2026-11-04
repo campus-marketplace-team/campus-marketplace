@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 import { getPayPalClient, type PayPalClient } from "./paypal/client.js";
+import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { chatRouter } from "./routes/chat.js";
 import { listingsRouter } from "./routes/listings.js";
@@ -64,6 +65,7 @@ export function createApp({ paypal = getPayPalClient }: { paypal?: () => PayPalC
   app.use("/api/listings", listingsRouter);
   app.use("/api/chats", chatRouter);
   app.use("/api/orders", createOrdersRouter(paypal));
+  app.use("/api/admin", adminRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
