@@ -23,6 +23,7 @@ const expected: Array<[OrderState, OrderState]> = [
   ["CAPTURED", "PAYOUT_PENDING"],
   ["PAYOUT_PENDING", "PAID_OUT"],
   ["PAYOUT_PENDING", "PAYOUT_RETRY"],
+  ["PAYOUT_RETRY", "PAYOUT_PENDING"],
 ];
 const key = (from: string, to: string) => `${from}->${to}`;
 const expectedKeys = new Set(expected.map(([from, to]) => key(from, to)));

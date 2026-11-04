@@ -121,3 +121,26 @@ authRouter.post("/login", async (req, res) => {
 authRouter.get("/me", requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
+
+// PUT /api/auth/me/paypal-email  (protected)  { paypalEmail, password }  ->  { paypalEmail }
+// Where seller payouts go; payouts wait until it's set. null or "" clears it. Needs the
+// current password too, so a stolen session token alone can't redirect someone's payouts.
+authRouter.put("/me/paypal-email", requireAuth, async (req, res) => {
+  const raw = req.body?.paypalEmail;
+  const clearing = raw === null || raw === "";
+  const paypalEmail = clearing ? null : normalizeEmail(raw);
+  const password = typeof req.body?.password === "string" ? req.body.password.slice(0, MAX_PASSWORD) : "";
+
+  if (!clearing && !paypalEmail) {
+    res.status(400).json({ error: "Enter a valid PayPal email address" });
+    return;
+  }
+  const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { passwordHash: true } });
+  if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+    if (!user?.passwordHash) await burnPasswordCheck(password);
+    res.status(401).json({ error: "Incorrect password" });
+    return;
+  }
+  const updated = await prisma.user.update({ where: { id: req.user!.id }, data: { paypalEmail }, select: { paypalEmail: true } });
+  res.json(updated);
+});

@@ -46,7 +46,7 @@ export const LEGAL_TRANSITIONS: Readonly<Record<OrderState, readonly OrderState[
   [S.CAPTURED]: [S.PAYOUT_PENDING],
   [S.PAYOUT_PENDING]: [S.PAID_OUT, S.PAYOUT_RETRY], // payout succeeds | payout fails
   [S.PAID_OUT]: [],
-  [S.PAYOUT_RETRY]: [],
+  [S.PAYOUT_RETRY]: [S.PAYOUT_PENDING], // worker re-sends the payout
 };
 
 /** True for strings that are a known order state (e.g. values from webhooks or requests). */

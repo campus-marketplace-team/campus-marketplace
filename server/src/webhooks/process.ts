@@ -58,6 +58,7 @@ export type WebhookOrder = {
   paypalAuthorizationId: string | null;
   paypalCaptureId: string | null;
   paypalPayoutItemId: string | null;
+  payoutAttempts: number;
 };
 
 export type StoredWebhookEvent = { id: string; eventId: string; eventType: string; payload: unknown };
@@ -91,6 +92,7 @@ const orderSelect = {
   paypalAuthorizationId: true,
   paypalCaptureId: true,
   paypalPayoutItemId: true,
+  payoutAttempts: true,
 } as const;
 
 /** true if `to` can be reached from `from` by one or more legal transitions. */

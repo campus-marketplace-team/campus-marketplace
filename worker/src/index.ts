@@ -7,6 +7,7 @@ import {
   outboxHandlers,
   prisma,
   sweepHandoffDeadlines,
+  sweepPayouts,
 } from "server/jobs";
 
 // Background jobs on pg-boss, which keeps its queue in the same Postgres (its
@@ -14,6 +15,7 @@ import {
 // the state machine, ledger and PayPal client with the API.
 
 const HANDOFF_DEADLINE_QUEUE = "handoff-deadline";
+const PAYOUTS_QUEUE = "payouts";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -37,6 +39,17 @@ await boss.schedule(HANDOFF_DEADLINE_QUEUE, "* * * * *"); // every minute
 await boss.work(HANDOFF_DEADLINE_QUEUE, async () => {
   const result = await sweepHandoffDeadlines(paypal);
   if (result.checked > 0) console.log("handoff-deadline sweep:", result);
+  return result;
+});
+
+// Seller payouts: send after capture, re-send failed ones after a backoff, and
+// check PayPal for sent ones no webhook has settled.
+await boss.createQueue(PAYOUTS_QUEUE, { policy: "stately", retryLimit: 2, expireInSeconds: 600 });
+await boss.schedule(PAYOUTS_QUEUE, "* * * * *"); // every minute
+
+await boss.work(PAYOUTS_QUEUE, async () => {
+  const result = await sweepPayouts(paypal);
+  if (result.checked > 0) console.log("payouts sweep:", result);
   return result;
 });
 
@@ -70,7 +83,9 @@ async function runOutboxRelay() {
 }
 const outboxRelay = runOutboxRelay();
 
-console.log(`Worker started: ${HANDOFF_DEADLINE_QUEUE} every minute, outbox relay every ${OUTBOX_POLL_MS / 1000}s`);
+console.log(
+  `Worker started: ${HANDOFF_DEADLINE_QUEUE} and ${PAYOUTS_QUEUE} every minute, outbox relay every ${OUTBOX_POLL_MS / 1000}s`,
+);
 
 async function shutdown(signal: string) {
   console.log(`${signal} received, stopping worker`);

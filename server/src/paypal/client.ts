@@ -85,7 +85,8 @@ export function valueToCents(value: string): number {
 
 // ---------- Request ids ----------
 
-export type PayPalAction = "create-order" | "authorize" | "capture" | "void";
+/** `payout-<n>` is attempt n of the seller payout (each attempt has its own sender_batch_id). */
+export type PayPalAction = "create-order" | "authorize" | "capture" | "void" | `payout-${number}`;
 
 /** PayPal-Request-Id for one action on one of our orders (max 108 chars; ours is 36 + action). */
 export function requestId(orderId: string, action: PayPalAction): string {
@@ -107,6 +108,25 @@ export type Authorization = {
 };
 
 export type Capture = { captureId: string; status: string; amountCents: number; currency: string };
+
+export type CreatedPayout = { payoutBatchId: string; batchStatus: string };
+
+export type PayoutItemStatus = {
+  payoutItemId: string;
+  /** SUCCESS, FAILED, PENDING, UNCLAIMED, RETURNED, ONHOLD, BLOCKED, REFUNDED, REVERSED (DENIED in older docs). */
+  transactionStatus: string;
+  senderItemId: string | null;
+  amountCents: number | null;
+  currency: string | null;
+  errorName: string | null;
+};
+
+/** sender_batch_id for attempt n of an order's payout. Unique for 30 days at PayPal. */
+export function payoutSenderBatchId(orderId: string, attempt: number): string {
+  if (!isUuid(orderId)) throw new TypeError(`orderId must be a UUID, got ${orderId}`);
+  if (!Number.isInteger(attempt) || attempt < 1) throw new TypeError(`attempt must be a positive integer, got ${attempt}`);
+  return `payout-${orderId}-${attempt}`;
+}
 
 /** The PAYPAL-* headers of a webhook delivery, which PayPal's verify endpoint checks. */
 export type WebhookSignatureHeaders = {
@@ -377,6 +397,91 @@ export function createPayPalClient(
         throw new PayPalError(action, "invalid_response", "response had no verification_status");
       }
       return { verificationStatus: json.verification_status };
+    },
+
+    /**
+     * POST /v1/payments/payouts: one EMAIL item for attempt `attempt` of the
+     * order's seller payout. sender_batch_id and PayPal-Request-Id both come
+     * from (order, attempt), so re-sending the same attempt after a timeout or
+     * 5xx pays at most once. sender_item_id is our order id (webhooks echo it).
+     */
+    async createPayout(input: {
+      orderId: string;
+      attempt: number;
+      receiverEmail: string;
+      amountCents: number;
+      currency?: string;
+    }): Promise<CreatedPayout> {
+      const action = `payout-${input.attempt}` as const;
+      const { json } = await call(action, input.orderId, "/v1/payments/payouts", {
+        sender_batch_header: {
+          sender_batch_id: payoutSenderBatchId(input.orderId, input.attempt),
+          email_subject: "You've been paid for your Campus Marketplace sale",
+          email_message: "The buyer confirmed the handoff, so here's your payment.",
+        },
+        items: [
+          {
+            recipient_type: "EMAIL",
+            receiver: input.receiverEmail,
+            amount: { currency: input.currency ?? "USD", value: centsToValue(input.amountCents) },
+            sender_item_id: input.orderId,
+            note: "Campus Marketplace sale",
+          },
+        ],
+      });
+      const header = json?.batch_header;
+      if (typeof header?.payout_batch_id !== "string") invalid(action, "response had no payout_batch_id");
+      return { payoutBatchId: header.payout_batch_id, batchStatus: String(header.batch_status) };
+    },
+
+    /** GET /v1/payments/payouts/{batch_id}: the batch's items and their status (we send one item per batch). */
+    async getPayoutBatch(input: { payoutBatchId: string }): Promise<{ batchStatus: string; items: PayoutItemStatus[] }> {
+      const action = "get-payout";
+      const attempt = async () =>
+        send(
+          action,
+          `${config.baseUrl}/v1/payments/payouts/${encodeURIComponent(input.payoutBatchId)}`,
+          { method: "GET", headers: { Authorization: `Bearer ${await accessToken()}`, Accept: "application/json" } },
+          timeoutMs,
+        );
+      let res = await attempt();
+      if (res.status === 401) {
+        token = null;
+        res = await attempt();
+      }
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok) {
+        throw new PayPalError(action, "http", [`HTTP ${res.status}`, json?.name, json?.message].filter(Boolean).join(" "), {
+          status: res.status,
+          paypalName: json?.name,
+          debugId: json?.debug_id ?? res.headers.get("paypal-debug-id") ?? undefined,
+        });
+      }
+      const items: unknown[] = Array.isArray(json?.items) ? json.items : [];
+      return {
+        batchStatus: String(json?.batch_header?.batch_status ?? ""),
+        items: items.flatMap((raw) => {
+          const item = raw as any;
+          if (typeof item?.payout_item_id !== "string" || typeof item?.transaction_status !== "string") return [];
+          const amount = item.payout_item?.amount;
+          let amountCents: number | null = null;
+          try {
+            amountCents = typeof amount?.value === "string" ? valueToCents(amount.value) : null;
+          } catch {
+            amountCents = null;
+          }
+          return [
+            {
+              payoutItemId: item.payout_item_id,
+              transactionStatus: item.transaction_status,
+              senderItemId: typeof item.payout_item?.sender_item_id === "string" ? item.payout_item.sender_item_id : null,
+              amountCents,
+              currency: typeof amount?.currency === "string" ? amount.currency : null,
+              errorName: typeof item.errors?.name === "string" ? item.errors.name : null,
+            },
+          ];
+        }),
+      };
     },
 
     /** POST /v2/payments/authorizations/{id}/void. The buyer is never charged. */

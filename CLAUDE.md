@@ -33,7 +33,7 @@ Authorize, then capture (`intent: AUTHORIZE`). Buyer funds are held, not taken.
 - Capture can exceed the authorized amount (up to 115% or +$75 USD, whichever is less). We never capture more than the authorized amount.
 
 **Payouts**
-- `sender_batch_id` must be unique for 30 days; a repeat is rejected and PayPal pays only once. Derive it from the order ID (e.g. `payout-<orderId>`) so retries are safe. After a 5xx, retry with the same `sender_batch_id`.
+- `sender_batch_id` must be unique for 30 days; a repeat is rejected and PayPal pays only once. Derive it from the order ID and attempt number (`payout-<orderId>-<attempt>`) so retries are safe. After a 5xx or timeout, retry with the same `sender_batch_id`; only a payout that definitely failed (PAYOUT_RETRY) gets the next attempt number.
 - One item per batch for us (limit is 15,000).
 - Item statuses: PENDING, SUCCESS, UNCLAIMED, ON_HOLD, FAILED, BLOCKED, DENIED, RETURNED, REFUNDED. Our mapping: only SUCCESS → PAID_OUT; FAILED, BLOCKED, DENIED, RETURNED → PAYOUT_RETRY.
 - UNCLAIMED (receiver has no PayPal account yet) is returned to us after **30 days**. An UNCLAIMED item can be cancelled (e.g. wrong receiver email), then re-sent.
@@ -60,6 +60,7 @@ Legal transitions:
 - AUTHORIZED → CAPTURED (QR scan verified)
 - CAPTURED → PAYOUT_PENDING → PAID_OUT
 - PAYOUT_PENDING → PAYOUT_RETRY (payout fails)
+- PAYOUT_RETRY → PAYOUT_PENDING (worker re-sends; after 5 failed attempts it stays in PAYOUT_RETRY for an admin)
 
 Rules:
 - All transitions go through one `transition(orderId, from, to, expectedVersion)` function. Illegal moves are rejected.

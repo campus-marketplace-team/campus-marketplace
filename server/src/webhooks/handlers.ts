@@ -5,6 +5,7 @@ import { postTransaction } from "../ledger/postTransaction.js";
 import { recordCapture } from "../orders/handoff.js";
 import { transition } from "../orders/stateMachine.js";
 import { valueToCents } from "../paypal/client.js";
+import { recordPayoutFailed, recordPayoutSucceeded } from "../payouts/payouts.js";
 import type { WebhookEventHandler, WebhookOrder } from "./process.js";
 
 // What each PayPal webhook event does to its order, always through the state
@@ -35,10 +36,13 @@ function resourceOf(payload: unknown) {
   return obj(obj(payload).resource);
 }
 
-/** { currency_code, value } → cents and currency, or null if it isn't a readable amount. */
+/**
+ * An amount → cents and currency, or null if it isn't readable. Orders and
+ * payments use { currency_code, value }; Payouts use { currency, value }.
+ */
 function amountOf(value: unknown): { cents: number; currency: string } | null {
   const a = obj(value);
-  const currency = str(a.currency_code);
+  const currency = str(a.currency_code) ?? str(a.currency);
   if (!currency || typeof a.value !== "string") return null;
   try {
     return { cents: valueToCents(a.value), currency };
@@ -184,12 +188,12 @@ function isThisOrdersItem(order: WebhookOrder, item: ReturnType<typeof payoutIte
   return item.senderItemId === order.id;
 }
 
-/** The order is CAPTURED: its payout hasn't been recorded as sent yet. Retry until it is (task 3.5's write). */
+/** The order is CAPTURED: its payout hasn't been recorded as sent yet. Retry until it is. */
 function payoutNotSentYet(order: WebhookOrder): never {
   throw new Error(`order ${order.id} is ${order.state}; its payout isn't recorded as sent yet`);
 }
 
-/** PAYMENT.PAYOUTS-ITEM.SUCCEEDED: PAYOUT_PENDING → PAID_OUT, seller_payable → paid_out. */
+/** PAYMENT.PAYOUTS-ITEM.SUCCEEDED: PAYOUT_PENDING → PAID_OUT, seller_payable → paid_out (src/payouts). */
 export const onPayoutSucceeded: WebhookEventHandler = async ({ event, order, tx, now }) => {
   const item = payoutItemOf(event.payload);
   if (order.state === "CAPTURED") payoutNotSentYet(order);
@@ -199,30 +203,17 @@ export const onPayoutSucceeded: WebhookEventHandler = async ({ event, order, tx,
   if (!item.payoutItemId || !isThisOrdersItem(order, item)) {
     return needsReview(order, `payout item ${item.payoutItemId} isn't this order's`);
   }
-  const expected = order.amountCents - order.platformFeeCents;
-  if (!item.amount || item.amount.cents !== expected || item.amount.currency !== order.currency) {
-    return needsReview(
-      order,
-      `payout ${item.payoutItemId} is ${item.amount ? `${item.amount.cents} ${item.amount.currency}` : "unreadable"}, expected ${expected} ${order.currency}`,
-    );
-  }
-
-  await transition(tx, order.id, "PAYOUT_PENDING", "PAID_OUT", order.version, {
-    paidOutAt: now,
-    paypalPayoutItemId: item.payoutItemId,
-  });
-  await postTransaction(
+  const problem = await recordPayoutSucceeded(
     tx,
-    [
-      { account: "seller_payable", amountCents: -expected },
-      { account: "paid_out", amountCents: expected },
-    ],
-    { kind: "PAYOUT", orderId: order.id, paypalRef: item.payoutItemId },
+    order,
+    { payoutItemId: item.payoutItemId, amountCents: item.amount?.cents ?? null, currency: item.amount?.currency ?? null },
+    now,
   );
+  if (problem) return needsReview(order, problem);
 };
 
-/** PAYMENT.PAYOUTS-ITEM.FAILED / BLOCKED / RETURNED: PAYOUT_PENDING → PAYOUT_RETRY (the worker re-sends, task 3.5). */
-export const onPayoutFailed: WebhookEventHandler = async ({ event, order, tx }) => {
+/** PAYMENT.PAYOUTS-ITEM.FAILED / BLOCKED / RETURNED: PAYOUT_PENDING → PAYOUT_RETRY; the worker re-sends after a backoff. */
+export const onPayoutFailed: WebhookEventHandler = async ({ event, order, tx, now }) => {
   const item = payoutItemOf(event.payload);
   if (order.state === "CAPTURED") payoutNotSentYet(order);
   if (order.state !== "PAYOUT_PENDING") {
@@ -230,10 +221,8 @@ export const onPayoutFailed: WebhookEventHandler = async ({ event, order, tx }) 
   }
   if (!isThisOrdersItem(order, item)) return needsReview(order, `payout item ${item.payoutItemId} isn't this order's`);
 
-  await transition(tx, order.id, "PAYOUT_PENDING", "PAYOUT_RETRY", order.version, {
-    ...(item.payoutItemId ? { paypalPayoutItemId: item.payoutItemId } : {}),
-  });
-  return `payout ${item.status ?? event.eventType}: will be retried`;
+  const status = item.status ?? event.eventType.split(".").pop() ?? event.eventType;
+  return recordPayoutFailed(tx, order, { payoutItemId: item.payoutItemId, status }, now);
 };
 
 /**

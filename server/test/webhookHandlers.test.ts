@@ -75,6 +75,7 @@ const orderSelect = {
   paypalAuthorizationId: true,
   paypalCaptureId: true,
   paypalPayoutItemId: true,
+  payoutAttempts: true,
 } as const;
 
 /** A committed $50 order (fee $5) in `state`, with no ledger entries, and its listing. */
@@ -152,6 +153,8 @@ async function postHistory(tx: Db, orderId: string, { captured = false } = {}) {
 }
 
 const usd = (value: string) => ({ currency_code: "USD", value });
+/** Payouts' amount shape: { currency, value } (not currency_code). */
+const payoutUsd = (value: string) => ({ currency: "USD", value });
 
 describe("PAYMENT.AUTHORIZATION.VOIDED", () => {
   it("AUTHORIZED → VOIDED: escrow back to the buyer, listing back on sale", async () => {
@@ -308,7 +311,7 @@ describe("PAYMENT.PAYOUTS-ITEM.*", () => {
       payout_item_id: `ITEM-${randomUUID()}`,
       payout_batch_id: `payout-${order.id}`,
       transaction_status: eventType.split(".").pop(),
-      payout_item: { sender_item_id: order.id, amount: usd("45.00"), receiver: "seller@example.com" },
+      payout_item: { sender_item_id: order.id, amount: payoutUsd("45.00"), receiver: "seller@example.com" },
       ...overrides,
     });
   }
@@ -332,11 +335,11 @@ describe("PAYMENT.PAYOUTS-ITEM.*", () => {
     const order = await createOrder("PAYOUT_PENDING");
     await inRollback(async (tx) => {
       const wrongAmount = payoutEvent("PAYMENT.PAYOUTS-ITEM.SUCCEEDED", order, {
-        payout_item: { sender_item_id: order.id, amount: usd("50.00") },
+        payout_item: { sender_item_id: order.id, amount: payoutUsd("50.00") },
       });
       expect(await run(onPayoutSucceeded, tx, order, wrongAmount)).toMatch(/expected 4500 USD/);
       const otherItem = payoutEvent("PAYMENT.PAYOUTS-ITEM.SUCCEEDED", order, {
-        payout_item: { sender_item_id: randomUUID(), amount: usd("45.00") },
+        payout_item: { sender_item_id: randomUUID(), amount: payoutUsd("45.00") },
       });
       expect(await run(onPayoutSucceeded, tx, order, otherItem)).toMatch(/isn't this order's/);
       expect(await stateOf(tx, order.id)).toEqual({ state: "PAYOUT_PENDING", version: 4 });
@@ -359,6 +362,9 @@ describe("PAYMENT.PAYOUTS-ITEM.*", () => {
         const note = await run(onPayoutFailed, tx, order, payoutEvent(`PAYMENT.PAYOUTS-ITEM.${type}`, order));
         expect(note).toBe(`payout ${type}: will be retried`);
         expect(await stateOf(tx, order.id)).toEqual({ state: "PAYOUT_RETRY", version: 5 });
+        const row = await tx.order.findUniqueOrThrow({ where: { id: order.id } });
+        expect(row.payoutNextAttemptAt!.getTime()).toBeGreaterThan(NOW.getTime()); // the worker re-sends later
+        expect(row.payoutLastError).toContain(type);
       });
     }
   });

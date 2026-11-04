@@ -173,6 +173,11 @@ model Order {
   paypalPayoutBatchId   String? @map("paypal_payout_batch_id")
   paypalPayoutItemId    String? @map("paypal_payout_item_id")
 
+  // Seller payout (src/payouts/payouts.ts). Attempt n uses sender_batch_id payout-<id>-<n>.
+  payoutAttempts      Int       @default(0) @map("payout_attempts")
+  payoutNextAttemptAt DateTime? @map("payout_next_attempt_at") @db.Timestamptz(3) // next re-send or status check
+  payoutLastError     String?   @map("payout_last_error")
+
   authorizedAt           DateTime? @map("authorized_at") @db.Timestamptz(3)
   authorizationExpiresAt DateTime? @map("authorization_expires_at") @db.Timestamptz(3)
   handoffDeadline        DateTime? @map("handoff_deadline") @db.Timestamptz(3) // authorizedAt + 72h
@@ -196,6 +201,7 @@ model Order {
 
   @@index([state, handoffDeadline]) // void sweeper
   @@index([state, authorizationExpiresAt]) // reauthorize sweeper
+  @@index([state, payoutNextAttemptAt]) // payout sweeper
   @@index([buyerId])
   @@index([sellerId])
   @@index([listingId])
