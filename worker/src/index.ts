@@ -9,6 +9,7 @@ import {
   sweepExpiringAuthorizations,
   sweepHandoffDeadlines,
   sweepPayouts,
+  sweepReconciliation,
 } from "server/jobs";
 
 // Background jobs on pg-boss, which keeps its queue in the same Postgres (its
@@ -18,6 +19,7 @@ import {
 const HANDOFF_DEADLINE_QUEUE = "handoff-deadline";
 const PAYOUTS_QUEUE = "payouts";
 const AUTHORIZATION_EXPIRY_QUEUE = "authorization-expiry";
+const RECONCILIATION_QUEUE = "reconciliation";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -65,6 +67,16 @@ await boss.work(AUTHORIZATION_EXPIRY_QUEUE, async () => {
   return result;
 });
 
+// Reconciliation: compare a batch of orders' ledger totals with PayPal and flag mismatches.
+await boss.createQueue(RECONCILIATION_QUEUE, { policy: "stately", retryLimit: 1, expireInSeconds: 600 });
+await boss.schedule(RECONCILIATION_QUEUE, "*/5 * * * *"); // every 5 minutes
+
+await boss.work(RECONCILIATION_QUEUE, async () => {
+  const result = await sweepReconciliation(paypal);
+  if (result.flagged > 0 || result.failed > 0) console.log("reconciliation sweep:", result);
+  return result;
+});
+
 // Outbox relay: a plain polling loop rather than a pg-boss schedule, whose
 // cron granularity (one minute) is coarser than the outbox's 30 s first retry.
 // The claim uses FOR UPDATE SKIP LOCKED, so running several workers is safe.
@@ -96,7 +108,7 @@ async function runOutboxRelay() {
 const outboxRelay = runOutboxRelay();
 
 console.log(
-  `Worker started: ${HANDOFF_DEADLINE_QUEUE} and ${PAYOUTS_QUEUE} every minute, ${AUTHORIZATION_EXPIRY_QUEUE} every 5 minutes, outbox relay every ${OUTBOX_POLL_MS / 1000}s`,
+  `Worker started: ${HANDOFF_DEADLINE_QUEUE} and ${PAYOUTS_QUEUE} every minute, ${AUTHORIZATION_EXPIRY_QUEUE} and ${RECONCILIATION_QUEUE} every 5 minutes, outbox relay every ${OUTBOX_POLL_MS / 1000}s`,
 );
 
 async function shutdown(signal: string) {

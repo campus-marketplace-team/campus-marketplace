@@ -97,6 +97,7 @@ export async function cleanup() {
       prisma.qrScan.deleteMany({ where: { OR: [{ scannerId: { in: ids } }, { order: orders }] } }),
       prisma.qrToken.deleteMany({ where: { OR: [{ sellerId: { in: ids } }, { usedById: { in: ids } }, { order: orders }] } }),
       prisma.notification.deleteMany({ where: { OR: [{ userId: { in: ids } }, { order: orders }] } }),
+      prisma.reconciliationFlag.deleteMany({ where: { order: orders } }),
       // Outbox rows would otherwise outlive their order (order_id ON DELETE SET NULL).
       prisma.outboxEvent.deleteMany({ where: { order: orders } }),
       prisma.order.deleteMany({ where: orders }),

@@ -118,12 +118,12 @@ model User {
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   listings         Listing[]
-  buyerOrders      Order[]       @relation("OrderBuyer")
-  sellerOrders     Order[]       @relation("OrderSeller")
-  sentMessages     ChatMessage[] @relation("MessageSender")
-  receivedMessages ChatMessage[] @relation("MessageRecipient")
-  qrTokensIssued   QrToken[]     @relation("QrSeller")
-  qrTokensRedeemed QrToken[]     @relation("QrRedeemer")
+  buyerOrders      Order[]        @relation("OrderBuyer")
+  sellerOrders     Order[]        @relation("OrderSeller")
+  sentMessages     ChatMessage[]  @relation("MessageSender")
+  receivedMessages ChatMessage[]  @relation("MessageRecipient")
+  qrTokensIssued   QrToken[]      @relation("QrSeller")
+  qrTokensRedeemed QrToken[]      @relation("QrRedeemer")
   qrScans          QrScan[]
   disputesOpened   Dispute[]
   approvals        Decision[]
@@ -178,6 +178,8 @@ model Order {
   payoutNextAttemptAt DateTime? @map("payout_next_attempt_at") @db.Timestamptz(3) // next re-send or status check
   payoutLastError     String?   @map("payout_last_error")
 
+  lastReconciledAt DateTime? @map("last_reconciled_at") @db.Timestamptz(3) // reconciliation job's cursor
+
   authorizedAt           DateTime? @map("authorized_at") @db.Timestamptz(3)
   authorizationExpiresAt DateTime? @map("authorization_expires_at") @db.Timestamptz(3)
   honorPeriodEndsAt      DateTime? @map("honor_period_ends_at") @db.Timestamptz(3) // 3 days after the latest (re)authorization
@@ -188,21 +190,23 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  listing       Listing       @relation(fields: [listingId], references: [id])
-  buyer         User          @relation("OrderBuyer", fields: [buyerId], references: [id])
-  seller        User          @relation("OrderSeller", fields: [sellerId], references: [id])
-  ledgerEntries LedgerEntry[]
-  outbox        OutboxEvent[]
-  decisions     Decision[]
-  qrTokens      QrToken[]
-  qrScans       QrScan[]
-  messages      ChatMessage[]
-  dispute       Dispute?
-  notifications Notification[]
+  listing             Listing              @relation(fields: [listingId], references: [id])
+  buyer               User                 @relation("OrderBuyer", fields: [buyerId], references: [id])
+  seller              User                 @relation("OrderSeller", fields: [sellerId], references: [id])
+  ledgerEntries       LedgerEntry[]
+  outbox              OutboxEvent[]
+  decisions           Decision[]
+  qrTokens            QrToken[]
+  qrScans             QrScan[]
+  messages            ChatMessage[]
+  dispute             Dispute?
+  notifications       Notification[]
+  reconciliationFlags ReconciliationFlag[]
 
   @@index([state, handoffDeadline]) // void sweeper
   @@index([state, authorizationExpiresAt]) // reauthorize sweeper
   @@index([state, honorPeriodEndsAt]) // reauthorize sweeper
+  @@index([lastReconciledAt]) // reconciliation job
   @@index([state, payoutNextAttemptAt]) // payout sweeper
   @@index([buyerId])
   @@index([sellerId])
@@ -387,6 +391,33 @@ model Notification {
   @@index([userId, createdAt])
   @@index([orderId])
   @@map("notifications")
+}
+
+enum ReconciliationStatus {
+  OPEN
+  RESOLVED
+}
+
+// A disagreement between an order's ledger and PayPal's records, found by the
+// reconciliation job (src/jobs/reconciliation.ts). One row per order and kind:
+// seen again → last_seen_at moves on; agrees again → RESOLVED; recurs → OPEN.
+model ReconciliationFlag {
+  id          String               @id @default(uuid()) @db.Uuid
+  orderId     String               @map("order_id") @db.Uuid
+  kind        String // HELD, CAPTURED, PAID_OUT, LEDGER, PAYPAL_RECORD
+  status      ReconciliationStatus @default(OPEN)
+  message     String
+  ledger      Json                 @db.JsonB // what our ledger says
+  paypal      Json                 @db.JsonB // what PayPal says (untrusted data)
+  firstSeenAt DateTime             @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt  DateTime             @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  resolvedAt  DateTime?            @map("resolved_at") @db.Timestamptz(3)
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@unique([orderId, kind])
+  @@index([status, lastSeenAt])
+  @@map("reconciliation_flags")
 }
 
 model Dispute {

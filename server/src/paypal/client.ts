@@ -120,6 +120,9 @@ export type Capture = { captureId: string; status: string; amountCents: number; 
 
 export type CreatedPayout = { payoutBatchId: string; batchStatus: string };
 
+/** An authorization, capture or refund as PayPal reports it now. */
+export type PaymentRecord = { id: string; status: string; amountCents: number | null; currency: string | null };
+
 export type PayoutItemStatus = {
   payoutItemId: string;
   /** SUCCESS, FAILED, PENDING, UNCLAIMED, RETURNED, ONHOLD, BLOCKED, REFUNDED, REVERSED (DENIED in older docs). */
@@ -269,6 +272,52 @@ export function createPayPalClient(
       });
     }
     return { status: res.status, json };
+  }
+
+  /** A read-only GET (no request id needed). Throws PayPalError on any non-2xx. */
+  async function getJson(action: string, path: string): Promise<any> {
+    const attempt = async () =>
+      send(
+        action,
+        `${config.baseUrl}${path}`,
+        { method: "GET", headers: { Authorization: `Bearer ${await accessToken()}`, Accept: "application/json" } },
+        timeoutMs,
+      );
+    let res = await attempt();
+    if (res.status === 401) {
+      token = null;
+      res = await attempt();
+    }
+    const json = (await res.json().catch(() => null)) as any;
+    if (!res.ok) {
+      throw new PayPalError(action, "http", [`HTTP ${res.status}`, json?.name, json?.message].filter(Boolean).join(" "), {
+        status: res.status,
+        paypalName: json?.name,
+        debugId: json?.debug_id ?? res.headers.get("paypal-debug-id") ?? undefined,
+      });
+    }
+    return json;
+  }
+
+  /** { id, status, amount } of an authorization / capture / refund, for reconciliation. */
+  async function getPayment(kind: "authorizations" | "captures" | "refunds", id: string): Promise<PaymentRecord> {
+    const action = `get-${kind}`;
+    const json = await getJson(action, `/v2/payments/${kind}/${encodeURIComponent(id)}`);
+    if (typeof json?.id !== "string" || typeof json?.status !== "string") {
+      throw new PayPalError(action, "invalid_response", "response had no id or status");
+    }
+    let amountCents: number | null = null;
+    try {
+      amountCents = typeof json.amount?.value === "string" ? valueToCents(json.amount.value) : null;
+    } catch {
+      amountCents = null;
+    }
+    return {
+      id: json.id,
+      status: json.status,
+      amountCents,
+      currency: typeof json.amount?.currency_code === "string" ? json.amount.currency_code : null,
+    };
   }
 
   function invalid(action: PayPalAction, what: string): never {
@@ -445,27 +494,7 @@ export function createPayPalClient(
 
     /** GET /v1/payments/payouts/{batch_id}: the batch's items and their status (we send one item per batch). */
     async getPayoutBatch(input: { payoutBatchId: string }): Promise<{ batchStatus: string; items: PayoutItemStatus[] }> {
-      const action = "get-payout";
-      const attempt = async () =>
-        send(
-          action,
-          `${config.baseUrl}/v1/payments/payouts/${encodeURIComponent(input.payoutBatchId)}`,
-          { method: "GET", headers: { Authorization: `Bearer ${await accessToken()}`, Accept: "application/json" } },
-          timeoutMs,
-        );
-      let res = await attempt();
-      if (res.status === 401) {
-        token = null;
-        res = await attempt();
-      }
-      const json = (await res.json().catch(() => null)) as any;
-      if (!res.ok) {
-        throw new PayPalError(action, "http", [`HTTP ${res.status}`, json?.name, json?.message].filter(Boolean).join(" "), {
-          status: res.status,
-          paypalName: json?.name,
-          debugId: json?.debug_id ?? res.headers.get("paypal-debug-id") ?? undefined,
-        });
-      }
+      const json = await getJson("get-payout", `/v1/payments/payouts/${encodeURIComponent(input.payoutBatchId)}`);
       const items: unknown[] = Array.isArray(json?.items) ? json.items : [];
       return {
         batchStatus: String(json?.batch_header?.batch_status ?? ""),
@@ -517,6 +546,13 @@ export function createPayPalClient(
         expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
       };
     },
+
+    /** GET /v2/payments/authorizations/{id}: CREATED, CAPTURED, DENIED, PARTIALLY_CAPTURED, VOIDED, PENDING. */
+    getAuthorization: (input: { authorizationId: string }) => getPayment("authorizations", input.authorizationId),
+    /** GET /v2/payments/captures/{id}: COMPLETED, DECLINED, PARTIALLY_REFUNDED, PENDING, REFUNDED, FAILED. */
+    getCapture: (input: { captureId: string }) => getPayment("captures", input.captureId),
+    /** GET /v2/payments/refunds/{id}: CANCELLED, FAILED, PENDING, COMPLETED. */
+    getRefund: (input: { refundId: string }) => getPayment("refunds", input.refundId),
 
     /** POST /v2/payments/authorizations/{id}/void. The buyer is never charged. */
     async voidAuthorization(input: { orderId: string; authorizationId: string }): Promise<{ status: string }> {
