@@ -6,7 +6,7 @@ import { Alert, ButtonLink, Card } from '../../components'
 import { usePoll } from '../../chat/usePoll'
 import { Page } from '../../layout/Page'
 import { formatPrice } from '../../listings/format'
-import { describeState, formatTimeLeft, ORDER_STATE_LABELS, stateTone } from '../../orders/orderStatus'
+import { describeState, formatTimeLeft, ORDER_STATE_LABELS, RISK_WARNING, stateTone } from '../../orders/orderStatus'
 import { fetchOrder, type OrderStatus } from '../../orders/ordersApi'
 import './orders.css'
 
@@ -76,6 +76,7 @@ function OrderDetails({ order }: { order: OrderStatus }) {
 
   return (
     <div className="stack">
+      {order.riskWarning && order.state === 'AUTHORIZED' && <Alert tone="error">{RISK_WARNING}</Alert>}
       <Card>
         <div className="order-status">
           <Link to={`/listings/${order.listing.id}`} className="order-status__item">

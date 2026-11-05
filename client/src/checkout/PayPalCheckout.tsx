@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { HANDOFF_WINDOW_HOURS } from '@campus/shared'
+import { HANDOFF_WINDOW_HOURS, RISK_HOLD_WINDOW_HOURS } from '@campus/shared'
 import { ApiError } from '../api/client'
 import { Alert, Card } from '../components'
 import type { Listing } from '../listings/listingsApi'
+import { RISK_WARNING } from '../orders/orderStatus'
 import { authorizeOrder, startCheckout, type CheckoutOrder } from './checkoutApi'
 import { loadPayPalSdk, PAYPAL_CLIENT_ID, type PayPalButtons } from './paypalSdk'
 import './checkout.css'
@@ -22,6 +23,7 @@ export function PayPalCheckout({ listing, onAuthorized }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [riskWarning, setRiskWarning] = useState(false)
 
   // Latest callback without re-rendering the buttons when the parent re-renders.
   const onAuthorizedRef = useRef(onAuthorized)
@@ -51,6 +53,7 @@ export function PayPalCheckout({ listing, onAuthorized }: Props) {
             try {
               const res = await startCheckout(listing.id)
               orderId.current = res.orderId
+              setRiskWarning(res.riskWarning)
               return res.paypalOrderId
             } catch (err) {
               fail(err, 'Could not start checkout. Please try again.')
@@ -97,8 +100,9 @@ export function PayPalCheckout({ listing, onAuthorized }: Props) {
       <div className="stack">
         <p className="text-muted checkout__explain">
           Your payment is held, not taken. You're only charged when you scan the seller's QR code at the handoff. If you
-          don't meet within {HANDOFF_WINDOW_HOURS} hours, the hold is cancelled.
+          don't meet within {riskWarning ? RISK_HOLD_WINDOW_HOURS : HANDOFF_WINDOW_HOURS} hours, the hold is cancelled.
         </p>
+        {riskWarning && <Alert tone="error">{RISK_WARNING}</Alert>}
         {error && <Alert tone="error">{error}</Alert>}
         {notice && <Alert>{notice}</Alert>}
         {(!PAYPAL_CLIENT_ID || status === 'unavailable') && (

@@ -56,7 +56,16 @@ beforeEach(() => {
 
 function createListing(status: "ACTIVE" | "SOLD" = "ACTIVE", priceCents = 5000) {
   return prisma.listing.create({
-    data: { sellerId, title: "checkout test", description: "test", category: "OTHER", priceCents, status },
+    // Backdated, or this file's many listings would trip the many_recent_listings risk rule.
+    data: {
+      sellerId,
+      title: "checkout test",
+      description: "test",
+      category: "OTHER",
+      priceCents,
+      status,
+      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    },
     select: { id: true },
   });
 }

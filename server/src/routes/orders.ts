@@ -4,6 +4,7 @@ import { authorizeCheckout, CheckoutError, startCheckout } from "../orders/check
 import { issueHandoffToken, redeemHandoffToken } from "../orders/handoff.js";
 import { getOrderStatus, listMyOrders } from "../orders/orderStatus.js";
 import type { PayPalClient } from "../paypal/client.js";
+import type { Classify } from "../risk/assess.js";
 
 // Order endpoints. GET / and GET /:id back "My orders" and the order status
 // page. The PayPal Buttons in the client call POST / from
@@ -12,7 +13,7 @@ import type { PayPalClient } from "../paypal/client.js";
 // itself is only ever called from the server.
 
 /** `getPayPal` is resolved per request so the API starts without PayPal configured. */
-export function createOrdersRouter(getPayPal: () => PayPalClient) {
+export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Classify) {
   const router = Router();
   router.use(requireAuth);
 
@@ -48,8 +49,9 @@ export function createOrdersRouter(getPayPal: () => PayPalClient) {
     respond(res, async () => ({ order: await getOrderStatus(req.user!.id, req.params.id) })),
   );
 
-  // POST /api/orders  { listingId }  (buyer) — starts checkout, returns { orderId, paypalOrderId }.
-  router.post("/", (req, res) => handle(res, (paypal) => startCheckout(paypal, req.user!.id, req.body?.listingId), 201));
+  // POST /api/orders  { listingId }  (buyer) — assesses risk and starts checkout, returns
+  // { orderId, paypalOrderId, riskWarning }, or 403 RISK_BLOCKED.
+  router.post("/", (req, res) => handle(res, (paypal) => startCheckout(paypal, classify, req.user!.id, req.body?.listingId), 201));
 
   // POST /api/orders/:id/authorize  (the order's buyer) — after PayPal approval. Returns { order }.
   router.post("/:id/authorize", (req, res) =>

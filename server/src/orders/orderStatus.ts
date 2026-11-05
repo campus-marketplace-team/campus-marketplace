@@ -1,5 +1,6 @@
 import { prisma } from "../db.js";
 import { isUuid } from "../ids.js";
+import { latestRiskOutcome } from "../risk/assess.js";
 import { CheckoutError, orderView } from "./checkout.js";
 
 // Read-only order views for the order status page and the "My orders" list.
@@ -35,7 +36,10 @@ export async function getOrderStatus(userId: string, orderId: unknown) {
   if (!order || (order.buyerId !== userId && order.sellerId !== userId)) {
     throw new CheckoutError(404, "NOT_FOUND", "Order not found");
   }
-  return toView(order, userId);
+  const view = toView(order, userId);
+  // Only the buyer is warned. The seller just sees the later deadline.
+  const riskWarning = view.role === "buyer" && (await latestRiskOutcome(prisma, order.id)) === "HOLD_WITH_WARNING";
+  return { ...view, riskWarning };
 }
 
 const LIST_LIMIT = 100;

@@ -5,6 +5,14 @@
 export const HANDOFF_WINDOW_HOURS = 72;
 export const HANDOFF_WINDOW_MS = HANDOFF_WINDOW_HOURS * 60 * 60 * 1000;
 
+/**
+ * The longer hold for an order the risk engine rated medium, which gives the buyer
+ * more time to check the item or report a problem. It outlasts the honor period,
+ * so the worker reauthorizes the hold while it runs.
+ */
+export const RISK_HOLD_WINDOW_HOURS = 120;
+export const RISK_HOLD_WINDOW_MS = RISK_HOLD_WINDOW_HOURS * 60 * 60 * 1000;
+
 /** A handoff QR code works once, for this long. The seller's page fetches a fresh one before it runs out. */
 export const HANDOFF_TOKEN_TTL_SECONDS = 5 * 60;
 

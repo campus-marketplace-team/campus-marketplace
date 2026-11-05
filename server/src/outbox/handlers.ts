@@ -15,8 +15,8 @@ export type OrderStateChangedPayload = { from: OrderState; to: OrderState; versi
 /** What the buyer and the seller are told when an order reaches a state. States not listed send nothing. */
 const STATE_MESSAGES: Partial<Record<OrderState, { buyer: string; seller: string }>> = {
   AUTHORIZED: {
-    buyer: "Your payment is on hold, not charged yet. Meet the seller within 72 hours and scan their handoff code.",
-    seller: "Your item has a buyer. Meet within 72 hours and show them the handoff code on the order page.",
+    buyer: "Your payment is on hold, not charged yet. Meet the seller before the deadline on the order page and scan their handoff code.",
+    seller: "Your item has a buyer. Meet before the deadline on the order page and show them the handoff code there.",
   },
   CAPTURED: {
     buyer: "Handoff confirmed. Your payment is complete.",

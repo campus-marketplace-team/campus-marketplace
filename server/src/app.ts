@@ -1,5 +1,7 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 import { getPayPalClient, type PayPalClient } from "./paypal/client.js";
+import type { Classify } from "./risk/assess.js";
+import { classifyRisk } from "./risk/classifier.js";
 import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { chatRouter } from "./routes/chat.js";
@@ -40,8 +42,8 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 };
 
-/** Tests pass a fake PayPal client; the real one is built from env on first use. */
-export function createApp({ paypal = getPayPalClient }: { paypal?: () => PayPalClient } = {}) {
+/** Tests pass a fake PayPal client and classifier; the real PayPal client is built from env on first use. */
+export function createApp({ paypal = getPayPalClient, classify = classifyRisk }: { paypal?: () => PayPalClient; classify?: Classify } = {}) {
   const app = express();
   // Render puts one proxy in front of us; trust it so req.ip is the real client IP (scan logs).
   app.set("trust proxy", 1);
@@ -64,7 +66,7 @@ export function createApp({ paypal = getPayPalClient }: { paypal?: () => PayPalC
   app.use("/api/auth", authRouter);
   app.use("/api/listings", listingsRouter);
   app.use("/api/chats", chatRouter);
-  app.use("/api/orders", createOrdersRouter(paypal));
+  app.use("/api/orders", createOrdersRouter(paypal, classify));
   app.use("/api/admin", adminRouter);
 
   app.use((_req, res) => {

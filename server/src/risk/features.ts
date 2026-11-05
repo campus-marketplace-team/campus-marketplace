@@ -18,7 +18,8 @@ export const MIN_COMPARABLE_LISTINGS = 3;
 /**
  * Matched against normalize()'s output: lowercase a-z, digits, "&", single
  * spaces. Over-matching ("no e-transfer please") is accepted: a hit is only a
- * signal, and the policy layer turns it into a warning rather than a block.
+ * signal. On its own the policy layer turns it into a warning rather than a
+ * block; it only blocks alongside a new seller and a low price.
  */
 const OFF_PLATFORM_PATTERNS = {
   e_transfer: /\b(?:e ?transfers?|e ?xfers?|e ?trans|interac|email money transfer)\b/,

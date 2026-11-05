@@ -9,6 +9,8 @@ export type OrderStatus = CheckoutOrder & {
   listing: { id: string; title: string; photoUrls: string[] }
   buyer: { displayName: string }
   seller: { displayName: string }
+  /** Single-order view only, and only for the buyer. */
+  riskWarning?: boolean
 }
 
 /** One of my orders (as buyer or seller). */

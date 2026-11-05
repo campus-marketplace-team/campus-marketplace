@@ -192,7 +192,7 @@ describe("voiding (and notifying) when the hold can't be kept", () => {
     const order = await createOrder({ deadlineIn: -HOUR });
     expect(await handleExpiringAuthorization(fakePayPal, order.id, NOW)).toBe("voided");
     expect(paypal.reauthorize).not.toHaveBeenCalled();
-    expect((await notes(order.id)).every((n) => /within 72 hours/.test(n.message))).toBe(true);
+    expect((await notes(order.id)).every((n) => /before its deadline/.test(n.message))).toBe(true);
   });
 
   it("IN_DISPUTE whose reauthorization is refused: not voided (no legal move); both sides told once", async () => {

@@ -15,9 +15,12 @@ export type CheckoutOrder = {
   capturedAt: string | null
 }
 
-/** Creates (or reuses) my order for this listing and its PayPal order. */
+/** Creates (or reuses) my order for this listing and its PayPal order, unless the risk check blocks it. */
 export function startCheckout(listingId: string) {
-  return api<{ orderId: string; paypalOrderId: string }>('/api/orders', { method: 'POST', body: { listingId } })
+  return api<{ orderId: string; paypalOrderId: string; riskWarning: boolean }>('/api/orders', {
+    method: 'POST',
+    body: { listingId },
+  })
 }
 
 /** After the buyer approves in PayPal: the server authorizes and holds the funds. */

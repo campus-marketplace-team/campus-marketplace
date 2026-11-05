@@ -18,6 +18,10 @@ export const ORDER_STATE_LABELS: Record<OrderState, string> = {
   PAYOUT_RETRY: 'Payout delayed',
 }
 
+/** Shown to the buyer of an order the risk check flagged. Fixed text: the check's reasons are internal. */
+export const RISK_WARNING =
+  'Our safety checks flagged this order, so you have extra time to meet. Never pay outside the app, and only scan the seller’s code once you have the item and are happy with it.'
+
 /** Badge colour group for a state. */
 export function stateTone(state: OrderState): 'waiting' | 'done' | 'problem' {
   switch (state) {

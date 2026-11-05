@@ -6,6 +6,7 @@ import { createApp } from "../../src/app.js";
 import { getAuthConfig } from "../../src/auth/config.js";
 import { hashPassword } from "../../src/auth/password.js";
 import { prisma } from "../../src/db.js";
+import type { RiskClassification } from "../../src/risk/classifier.js";
 
 // API tests run the real app against the real database (DATABASE_URL), on a
 // random local port. Every user they create has an email starting with
@@ -27,10 +28,24 @@ export type Api = {
   close: () => Promise<void>;
 };
 
-/** Pass `paypal` to replace the real PayPal client with a fake. */
+/** A classifier answer of "low", so the policy's hard rules alone decide. */
+export const lowRisk: RiskClassification = {
+  risk: "low",
+  reasons: ["test"],
+  signals: [],
+  source: "llm",
+  fallbackReason: null,
+  model: "test-model",
+  rawOutput: null,
+};
+
+/**
+ * Pass `paypal` to replace the real PayPal client with a fake. The classifier is
+ * always faked unless a test passes another, so `npm test` never calls Claude.
+ */
 export async function startApi(options: Parameters<typeof createApp>[0] = {}): Promise<Api> {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-  const server = createApp(options).listen(0, "127.0.0.1");
+  const server = createApp({ classify: async () => lowRisk, ...options }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
 
@@ -100,6 +115,8 @@ export async function cleanup() {
       prisma.reconciliationFlag.deleteMany({ where: { order: orders } }),
       // Outbox rows would otherwise outlive their order (order_id ON DELETE SET NULL).
       prisma.outboxEvent.deleteMany({ where: { order: orders } }),
+      // So would decisions (order_id and listing_id ON DELETE SET NULL).
+      prisma.decision.deleteMany({ where: { OR: [{ order: orders }, { listing: listings }] } }),
       prisma.order.deleteMany({ where: orders }),
       prisma.listing.deleteMany({ where: listings }),
       prisma.user.deleteMany({ where: { id: { in: ids } } }),

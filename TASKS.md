@@ -141,10 +141,10 @@ Goal: every order gets a risk decision before payment, and complaints are resolv
 - [x] **4.1 Risk features** (server/src/risk/features.ts: computeRiskFeatures(db, orderId, now) returns seller account age, seller listings in the last 24 h, amount vs category median (other sellers' non-removed listings, same currency, null under 3 comparables), seller + buyer past disputes, off-platform payment phrases in the order's chat; findOffPlatformPhrases catches spacing, leetspeak, lookalike and invisible-character evasion. Output holds only numbers and ids, no listing or chat text. Not called from checkout yet (4.3). Tests in server/test/riskFeatures.test.ts. No migration, no new env vars.)
   > Read CLAUDE.md. Build deterministic risk features for an order: seller account age, listings posted in the last 24 hours, price vs category median, past disputes, and off-platform payment phrases in chat (e-transfer, cash app, etc.). When done, tick task 4.1 in TASKS.md.
 
-- [ ] **4.2 LLM risk classifier**
+- [] **4.2 LLM risk classifier**
   > Read CLAUDE.md. Build the LLM risk classifier: inputs are the listing, features and chat, output is JSON-schema validated { risk: low|medium|high, reasons, signals }. Listing and chat text are passed as clearly delimited untrusted data. Invalid output falls back to medium. When done, tick task 4.2 in TASKS.md.
 
-- [ ] **4.3 Policy layer**
+- [x] **4.3 Policy layer** (server/src/risk/policy.ts: pure applyRiskPolicy, hard-rule floor + classifier, low → NORMAL, medium → HOLD_WITH_WARNING, high → BLOCKED. server/src/risk/assess.ts: assessOrderRisk runs features → classifier → policy and saves to decisions; a block commits with its decision. Called from startCheckout before the PayPal order; a block sticks per buyer + listing, and authorize refuses unassessed orders. Longer hold = 120 h handoff deadline (RISK_HOLD_WINDOW_HOURS in shared), kept alive by the reauthorize job. createApp takes `classify`; startApi fakes it, so npm test never calls Claude. Tests in server/test/riskPolicy.test.ts and riskCheckout.test.ts. No migration, no new env vars.)
   > Read CLAUDE.md. Build the risk policy layer: hard rules act as a floor (e.g. off-platform payment phrases mean at least medium), combined with the LLM result, mapped to normal / longer hold with warning / BLOCKED. Run it before checkout and save every decision to the decisions table. When done, tick task 4.3 in TASKS.md.
 
 - [ ] **4.4 Risk evals**

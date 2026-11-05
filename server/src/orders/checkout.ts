@@ -1,16 +1,19 @@
-import { AUTHORIZATION_VALID_DAYS, HANDOFF_WINDOW_MS, HONOR_PERIOD_MS, platformFeeCents } from "@campus/shared";
+import { AUTHORIZATION_VALID_DAYS, HONOR_PERIOD_MS, platformFeeCents } from "@campus/shared";
 import { type Db, prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import { postTransaction } from "../ledger/postTransaction.js";
 import { type Authorization, type PayPalClient, PayPalError } from "../paypal/client.js";
+import { assessOrderRisk, type Classify, isBlockedForBuyer, latestRiskOutcome } from "../risk/assess.js";
+import { handoffWindowMs } from "../risk/policy.js";
 import { StaleOrderError, transition } from "./stateMachine.js";
 
 // Checkout (see CLAUDE.md "Payment model"):
-//   1. startCheckout: our order (CREATED) + a PayPal order with intent AUTHORIZE.
+//   1. startCheckout: our order (CREATED), a risk decision (which can block the
+//      order here), then a PayPal order with intent AUTHORIZE.
 //   2. The buyer approves in the PayPal popup.
 //   3. authorizeCheckout: PayPal authorizes (funds held, not taken), then ONE DB
 //      transaction reserves the listing, moves the order to AUTHORIZED with a
-//      72-hour handoff deadline, and posts escrow_held / buyer_funds.
+//      handoff deadline set by the risk decision, and posts escrow_held / buyer_funds.
 //
 // Both steps are safe to repeat: PayPal calls reuse the order's request ids,
 // and an order that's already AUTHORIZED is returned as is.
@@ -54,7 +57,12 @@ export function paypalFailure(err: unknown): never {
   throw new CheckoutError(502, "PAYPAL_ERROR", "PayPal couldn't process this payment. Please try again later.");
 }
 
-/** Voids an authorization we can't use. Failures are logged; the 72-hour sweeper is the backstop. */
+/** The same fixed refusal everywhere. The classifier's reasons stay internal: they're shaped by untrusted text. */
+function riskBlocked() {
+  return new CheckoutError(403, "RISK_BLOCKED", "This order was blocked by our safety checks. You haven't been charged.");
+}
+
+/** Voids an authorization we can't use. Failures are logged; the handoff deadline sweeper is the backstop. */
 async function voidQuietly(paypal: PayPalClient, orderId: string, authorizationId: string) {
   try {
     await paypal.voidAuthorization({ orderId, authorizationId });
@@ -64,10 +72,11 @@ async function voidQuietly(paypal: PayPalClient, orderId: string, authorizationI
 }
 
 /**
- * Creates (or reuses) the buyer's CREATED order for this listing and its
- * PayPal order. Returns the PayPal order id for the Buttons' createOrder.
+ * Creates (or reuses) the buyer's CREATED order for this listing, assesses its
+ * risk, and creates its PayPal order unless it's blocked. Returns the PayPal
+ * order id for the Buttons' createOrder and whether to warn the buyer.
  */
-export async function startCheckout(paypal: PayPalClient, buyerId: string, listingId: unknown) {
+export async function startCheckout(paypal: PayPalClient, classify: Classify, buyerId: string, listingId: unknown) {
   const listing = isUuid(listingId)
     ? await prisma.listing.findUnique({
         where: { id: listingId },
@@ -79,6 +88,7 @@ export async function startCheckout(paypal: PayPalClient, buyerId: string, listi
   if (listing.status !== "ACTIVE") {
     throw new CheckoutError(409, "LISTING_UNAVAILABLE", "This listing isn't available anymore");
   }
+  if (await isBlockedForBuyer(prisma, buyerId, listing.id)) throw riskBlocked();
 
   // Reuse an unpaid order at the current price, so clicking Pay twice doesn't
   // pile up orders. A price change since then gets a fresh order (and a fresh
@@ -107,7 +117,19 @@ export async function startCheckout(paypal: PayPalClient, buyerId: string, listi
       },
       select: { id: true, paypalOrderId: true },
     }));
-  if (order.paypalOrderId) return { orderId: order.id, paypalOrderId: order.paypalOrderId };
+
+  let outcome;
+  try {
+    outcome = await assessOrderRisk(order.id, { classify });
+  } catch (err) {
+    // The order left CREATED during the assessment, e.g. a concurrent authorize in another tab.
+    if (err instanceof StaleOrderError) throw new CheckoutError(409, "ORDER_CLOSED", "This order can't be paid anymore");
+    throw err;
+  }
+  if (outcome === "BLOCKED") throw riskBlocked();
+  const riskWarning = outcome === "HOLD_WITH_WARNING";
+
+  if (order.paypalOrderId) return { orderId: order.id, paypalOrderId: order.paypalOrderId, riskWarning };
 
   const created = await paypal
     .createOrder({ orderId: order.id, amountCents: listing.priceCents, currency: listing.currency })
@@ -117,13 +139,14 @@ export async function startCheckout(paypal: PayPalClient, buyerId: string, listi
     where: { id: order.id, paypalOrderId: null },
     data: { paypalOrderId: created.paypalOrderId },
   });
-  return { orderId: order.id, paypalOrderId: created.paypalOrderId };
+  return { orderId: order.id, paypalOrderId: created.paypalOrderId, riskWarning };
 }
 
 /**
  * The DB half of authorizing, in the caller's transaction: reserve the
- * listing, CREATED → AUTHORIZED with the handoff deadline, and post
- * escrow_held +amount / buyer_funds −amount. Throws ListingUnavailableError
+ * listing, CREATED → AUTHORIZED with the handoff deadline (longer if the latest
+ * risk decision says so), and post escrow_held +amount / buyer_funds −amount.
+ * Throws ListingUnavailableError
  * or StaleOrderError, which roll the whole transaction back.
  */
 export async function recordAuthorization(
@@ -141,7 +164,7 @@ export async function recordAuthorization(
   await transition(tx, order.id, "CREATED", "AUTHORIZED", order.version, {
     paypalAuthorizationId: authorization.authorizationId,
     authorizedAt: now,
-    handoffDeadline: new Date(now.getTime() + HANDOFF_WINDOW_MS),
+    handoffDeadline: new Date(now.getTime() + handoffWindowMs(await latestRiskOutcome(tx, order.id))),
     honorPeriodEndsAt: new Date(now.getTime() + HONOR_PERIOD_MS),
     authorizationExpiresAt:
       authorization.expiresAt ?? new Date(now.getTime() + AUTHORIZATION_VALID_DAYS * 24 * 60 * 60 * 1000),
@@ -168,11 +191,18 @@ export async function authorizeCheckout(paypal: PayPalClient, buyerId: string, o
   // Someone else's order looks the same as a missing one.
   if (!order || order.buyerId !== buyerId) throw new CheckoutError(404, "NOT_FOUND", "Order not found");
   if (order.state === "AUTHORIZED") return getOrderView(order.id);
+  if (order.state === "BLOCKED") throw riskBlocked();
   if (order.state !== "CREATED") {
     throw new CheckoutError(409, "ORDER_CLOSED", "This order can't be paid anymore");
   }
   if (!order.paypalOrderId) {
     throw new CheckoutError(409, "NOT_STARTED", "Start checkout with PayPal first");
+  }
+  // No money is held without a decision: covers orders from before the risk engine,
+  // and a second open order for this listing whose sibling got blocked.
+  if (await isBlockedForBuyer(prisma, buyerId, order.listingId)) throw riskBlocked();
+  if (!(await latestRiskOutcome(prisma, order.id))) {
+    throw new CheckoutError(409, "NOT_ASSESSED", "Please start checkout again");
   }
 
   let authorization: Authorization;

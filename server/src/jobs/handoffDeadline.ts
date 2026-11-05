@@ -96,8 +96,8 @@ export async function recordVoid(
   const messages =
     notify === true
       ? {
-          buyer: "Your order was cancelled because the handoff didn't happen within 72 hours. You haven't been charged.",
-          seller: "An order was cancelled because the handoff didn't happen within 72 hours. Your listing is back on sale.",
+          buyer: "Your order was cancelled because the handoff didn't happen before its deadline. You haven't been charged.",
+          seller: "An order was cancelled because the handoff didn't happen before its deadline. Your listing is back on sale.",
         }
       : notify;
   await tx.notification.createMany({
