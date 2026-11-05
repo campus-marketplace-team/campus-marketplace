@@ -89,6 +89,7 @@ QR holds a signed token (HMAC/JWT) bound to order ID, seller ID, single-use nonc
 
 ## AI
 - **The LLM never moves money directly.** It returns structured JSON; a deterministic policy layer decides.
+- **Every Claude call goes through `callClaude` (`server/src/ai/claude.ts`)**, which reserves daily budget first (max 300 calls per UTC day, 20 per user) and applies per-call-site caps. The dispute agent calls it via `callDisputeAgentClaude`. Only the eval and live check scripts may bypass the budget.
 - Risk engine: deterministic features → LLM classifier `{ risk: low|medium|high, reasons, signals }` → policy layer (hard rules are a floor, e.g. "e-transfer" in chat ⇒ at least medium) → normal / longer hold with warning / BLOCKED. Saved to `decisions`.
 - Listing text and chat are **untrusted input** (prompt injection). Never let them unlock money.
 - Evals: ~40 labeled listings/chats incl. injection cases; script reports precision and recall.

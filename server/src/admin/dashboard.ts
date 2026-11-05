@@ -1,5 +1,6 @@
 import { ORDER_STATES, type OrderState } from "@campus/shared";
 import { z } from "zod";
+import { getClaudeUsage } from "../ai/claude.js";
 import { prisma } from "../db.js";
 
 // Data for the admin dashboard (client/src/pages/admin). Read-only. Money is
@@ -227,7 +228,7 @@ async function getDecisionRecords() {
 }
 
 export async function getAdminDashboard() {
-  const [stateGroups, accountSums, orderCount, orders, flags, openFlagCount, deadLetters, deadLetterCount, disputeQueues, decisionRecords] = await Promise.all([
+  const [stateGroups, accountSums, orderCount, orders, flags, openFlagCount, deadLetters, deadLetterCount, disputeQueues, decisionRecords, claudeUsage] = await Promise.all([
     prisma.order.groupBy({ by: ["state"], _count: { _all: true } }),
     prisma.ledgerEntry.groupBy({ by: ["account"], _sum: { amountCents: true } }),
     prisma.order.count(),
@@ -275,6 +276,7 @@ export async function getAdminDashboard() {
     prisma.outboxEvent.count({ where: { status: "DEAD" } }),
     getDisputeQueues(),
     getDecisionRecords(),
+    getClaudeUsage(),
   ]);
 
   // Per-order ledger totals for the rows shown.
@@ -306,6 +308,7 @@ export async function getAdminDashboard() {
     deadLetterCount,
     ...disputeQueues,
     ...decisionRecords,
+    claudeUsage,
   };
 }
 

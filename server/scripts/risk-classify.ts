@@ -1,6 +1,6 @@
 // Checks the LLM risk classifier against the real Claude API with three made-up
-// orders. Needs ANTHROPIC_API_KEY in server/.env. Uses no database and costs a
-// few cents at most. Exits 1 if any order fell back instead of getting an answer:
+// orders. Needs ANTHROPIC_API_KEY in server/.env. Uses no database, bypasses the
+// app's Claude budget, and costs a few cents at most. Exits 1 if any order fell back instead of getting an answer:
 // a rejected request would otherwise just look like "medium" everywhere.
 //
 // Run:  npm run risk:classify -w server
@@ -68,7 +68,7 @@ const CASES: { name: string; input: RiskInput }[] = [
 async function main() {
   let failed = false;
   for (const { name, input } of CASES) {
-    const result = await classifyRisk(input);
+    const result = await classifyRisk(input, { budget: { bypass: "live_check" } });
     if (result.source !== "llm") failed = true;
     console.log(`\n${name}`);
     console.log(`  risk:    ${result.risk}`);

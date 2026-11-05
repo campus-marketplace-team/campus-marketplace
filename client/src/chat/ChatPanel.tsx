@@ -8,7 +8,8 @@ import { usePoll } from './usePoll'
 import '../components/Input.css'
 import './chat.css'
 
-const MESSAGE_POLL_MS = 4000
+// 240 requests per 15 minutes at most, under the API's general limit of 300 even with other pages' requests.
+const MESSAGE_POLL_MS = 5000
 const THREAD_POLL_MS = 15000
 
 /**

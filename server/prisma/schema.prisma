@@ -438,6 +438,18 @@ model ReconciliationFlag {
   @@map("reconciliation_flags")
 }
 
+// Claude calls reserved per UTC day (server/src/ai/claude.ts). One "total" row and one
+// "user:<id>" row per day. No foreign key: deleting an account must not refund its calls.
+model ClaudeBudgetUsage {
+  day       DateTime @db.Date
+  scope     String
+  calls     Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([day, scope])
+  @@map("claude_budget_usage")
+}
+
 model Dispute {
   id          String        @id @default(uuid()) @db.Uuid
   orderId     String        @unique @map("order_id") @db.Uuid

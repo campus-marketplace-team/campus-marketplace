@@ -140,6 +140,24 @@ function Dashboard({
         </section>
       </div>
 
+      <section aria-labelledby="claude-heading">
+        <h2 id="claude-heading" className="admin__heading">
+          Claude API today{' '}
+          {data.claudeUsage.calls >= data.claudeUsage.limit && <span className="admin__count admin__count--alert">Budget used up</span>}
+        </h2>
+        <p className="text-muted admin__hint">
+          Resets at midnight UTC. With the budget used up, risk checks count as medium risk and disputes go to an admin.
+        </p>
+        <div className="admin__tiles">
+          <StatTile label="Calls today" value={`${data.claudeUsage.calls} / ${data.claudeUsage.limit}`} hint={`UTC day ${data.claudeUsage.day}`} />
+          <StatTile
+            label="Busiest user"
+            value={`${data.claudeUsage.busiestUserCalls} / ${data.claudeUsage.perUserLimit}`}
+            hint={`${data.claudeUsage.usersAtLimit} at their limit`}
+          />
+        </div>
+      </section>
+
       <AiDecisions
         risk={data.riskDecisions}
         riskCounts={data.riskDecisionCounts}
@@ -167,10 +185,14 @@ function Dashboard({
 }
 
 function Tile({ label, cents, hint }: { label: string; cents: number; hint: string }) {
+  return <StatTile label={label} value={formatPrice(cents)} hint={hint} />
+}
+
+function StatTile({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
     <div className="admin-tile">
       <div className="admin-tile__label">{label}</div>
-      <div className="admin-tile__value">{formatPrice(cents)}</div>
+      <div className="admin-tile__value">{value}</div>
       <div className="admin-tile__hint">{hint}</div>
     </div>
   )

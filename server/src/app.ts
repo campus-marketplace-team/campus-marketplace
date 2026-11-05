@@ -1,4 +1,5 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
+import { createRateLimiter, type RateLimits } from "./http/rateLimit.js";
 import { getPayPalClient, type PayPalClient } from "./paypal/client.js";
 import type { Classify } from "./risk/assess.js";
 import { classifyRisk } from "./risk/classifier.js";
@@ -18,6 +19,8 @@ function cors(allowed: string[]): RequestHandler {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Vary", "Origin");
+      // Lets the client read when to retry after a 429.
+      res.setHeader("Access-Control-Expose-Headers", "Retry-After");
       if (req.method === "OPTIONS") {
         res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
@@ -42,10 +45,17 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 };
 
-/** Tests pass a fake PayPal client and classifier; the real PayPal client is built from env on first use. */
-export function createApp({ paypal = getPayPalClient, classify = classifyRisk }: { paypal?: () => PayPalClient; classify?: Classify } = {}) {
+/** Largest JSON body. Well above any real form (the longest text field is 4,000 characters), so huge text never reaches a handler. */
+export const JSON_BODY_LIMIT = "32kb";
+
+/** Tests pass a fake PayPal client and classifier, and their own rate limits; the real PayPal client is built from env on first use. */
+export function createApp({
+  paypal = getPayPalClient,
+  classify = (input, budget) => classifyRisk(input, { budget }),
+  rateLimits,
+}: { paypal?: () => PayPalClient; classify?: Classify; rateLimits?: Partial<RateLimits> } = {}) {
   const app = express();
-  // Render puts one proxy in front of us; trust it so req.ip is the real client IP (scan logs).
+  // Render puts one proxy in front of us; trust it so req.ip is the real client IP (scan logs, rate limits).
   app.set("trust proxy", 1);
 
   const allowedOrigins = (process.env.CORS_ORIGINS ?? "")
@@ -55,13 +65,16 @@ export function createApp({ paypal = getPayPalClient, classify = classifyRisk }:
 
   app.use(cors(allowedOrigins));
   // Before express.json(): signature verification needs the raw body.
+  // Also before the rate limiter: PayPal's retries must never get a 429.
   app.use("/api/webhooks", createWebhooksRouter(paypal));
-  app.use(express.json());
 
-  // Cheap liveness check for the host's health checks; does not touch the DB.
+  // Cheap liveness check for the host's health checks; does not touch the DB, and isn't rate limited.
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
+
+  app.use("/api", createRateLimiter(rateLimits));
+  app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   app.use("/api/auth", authRouter);
   app.use("/api/listings", listingsRouter);

@@ -1,6 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLAUDE_CALL_CAPS, type ClaudeBudget } from "../src/ai/claude.js";
 import { buildRiskPrompt, classifyRisk, loadRiskInput, MAX_CHAT_MESSAGES, RISK_MODEL, RISK_SIGNALS, type RiskInput } from "../src/risk/classifier.js";
 import { cleanup, createTestUser, prisma } from "./helpers/api.js";
+
+const NO_BUDGET: ClaudeBudget = { bypass: "live_check" };
 
 // Claude is replaced by a fake createMessage, so these tests cover the request we
 // send and how every kind of answer is handled. `npm run risk:classify -w server`
@@ -27,7 +30,7 @@ function response(text: string, overrides: Record<string, unknown> = {}) {
 }
 
 function classifyWith(result: unknown) {
-  return classifyRisk(INPUT, { createMessage: vi.fn().mockResolvedValue(result) });
+  return classifyRisk(INPUT, { budget: NO_BUDGET, createMessage: vi.fn().mockResolvedValue(result) });
 }
 
 /** The untrusted part between two tags, decoded back from JSON. */
@@ -72,9 +75,10 @@ describe("classifyRisk", () => {
 
   it("asks for schema-constrained output with a timeout and fallbacks", async () => {
     const createMessage = vi.fn().mockResolvedValue(response(JSON.stringify(VALID_OUTPUT)));
-    await classifyRisk(INPUT, { createMessage });
+    await classifyRisk(INPUT, { budget: NO_BUDGET, createMessage });
 
     const [params, options] = createMessage.mock.calls[0];
+    expect(params.max_tokens).toBe(CLAUDE_CALL_CAPS.risk_classifier.maxTokens);
     expect(params).toMatchObject({ model: RISK_MODEL, fallbacks: "default", betas: ["server-side-fallback-2026-07-01"] });
     expect(params.output_config.format.type).toBe("json_schema");
     expect(params.output_config.format.schema.properties.risk.enum).toEqual(["low", "medium", "high"]);
@@ -121,7 +125,7 @@ describe("classifyRisk", () => {
 
   it("falls back to medium instead of throwing when the API call fails", async () => {
     const createMessage = vi.fn().mockRejectedValue(new Error("connection reset"));
-    const result = await classifyRisk(INPUT, { createMessage });
+    const result = await classifyRisk(INPUT, { budget: NO_BUDGET, createMessage });
     expect(result).toMatchObject({ risk: "medium", source: "fallback", fallbackReason: "llm_error", model: RISK_MODEL, rawOutput: null });
     expect(vi.mocked(console.warn).mock.calls.flat().join(" ")).toContain("connection reset");
   });

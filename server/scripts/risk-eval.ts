@@ -1,6 +1,6 @@
 // Runs the labeled risk eval set through the risk engine with the real Claude API
 // and prints precision and recall. Needs ANTHROPIC_API_KEY in server/.env. Uses no
-// database and makes one paid API call per case. Exits 1 if any case fell back,
+// database and makes one paid API call per case, outside the app's Claude budget. Exits 1 if any case fell back,
 // because those aren't scored and the numbers would be incomplete.
 //
 // Run:  npm run risk:eval -w server
@@ -22,7 +22,7 @@ function printScore(title: string, { precision, recall, truePositives, falsePosi
 }
 
 async function main() {
-  const results = await runRiskEval(RISK_EVAL_CASES, classifyRisk, CONCURRENCY);
+  const results = await runRiskEval(RISK_EVAL_CASES, (input, budget) => classifyRisk(input, { budget }), CONCURRENCY);
 
   console.log(`${"case".padEnd(34)} ${"label".padEnd(6)} ${"llm".padEnd(7)} ${"floor".padEnd(7)} ${"outcome".padEnd(18)} result`);
   for (const result of results) {

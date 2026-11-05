@@ -30,6 +30,14 @@ type RequestOptions = {
   signal?: AbortSignal
 }
 
+/** What to tell someone who hit a rate limit (HTTP 429). Every page already shows ApiError's message. */
+export function rateLimitMessage(retryAfterSeconds: unknown): string {
+  const seconds = Number(retryAfterSeconds)
+  if (!Number.isFinite(seconds) || seconds <= 0) return "You're doing that a bit too often. Please wait a little and try again."
+  const wait = seconds < 60 ? 'less than a minute' : `about ${Math.ceil(seconds / 60)} minute${seconds > 60 ? 's' : ''}`
+  return `You're doing that a bit too often. Please try again in ${wait}.`
+}
+
 /** Request to the API. Sends the session token if there is one. Throws ApiError on non-2xx. */
 export async function api<T>(path: string, { method = 'GET', body, signal }: RequestOptions = {}): Promise<T> {
   const token = getToken()
@@ -55,7 +63,12 @@ export async function api<T>(path: string, { method = 'GET', body, signal }: Req
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     if (res.status === 401 && token) onUnauthorized?.()
-    const message = typeof data?.error === 'string' ? data.error : 'Something went wrong. Please try again.'
+    const message =
+      res.status === 429
+        ? rateLimitMessage(data?.retryAfterSeconds ?? res.headers.get('Retry-After'))
+        : typeof data?.error === 'string'
+          ? data.error
+          : 'Something went wrong. Please try again.'
     throw new ApiError(res.status, message, typeof data?.code === 'string' ? data.code : undefined)
   }
   return data as T

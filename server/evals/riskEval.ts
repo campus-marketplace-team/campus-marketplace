@@ -37,7 +37,7 @@ export function buildRiskInput(testCase: RiskEvalCase): RiskInput {
 
 export async function runRiskCase(testCase: RiskEvalCase, classify: Classify): Promise<RiskEvalResult> {
   const input = buildRiskInput(testCase);
-  const classification = await classify(input);
+  const classification = await classify(input, { bypass: "eval" });
   return { testCase, classification, decision: applyRiskPolicy(input.features, classification) };
 }
 

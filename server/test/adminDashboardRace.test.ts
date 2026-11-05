@@ -19,6 +19,7 @@ vi.mock("../src/db.js", () => {
       ledgerEntry: { groupBy: none },
       reconciliationFlag: { count: zero, findMany: async () => [{ id: "flag-gone", order: null }, { id: "flag", order: { state: "CREATED" } }] },
       outboxEvent: { count: zero, findMany: none },
+      claudeBudgetUsage: { findMany: none },
       dispute: { findMany: async () => [{ id: "esc-gone", order: deletedMidRead }, { id: "esc", order: whole }] },
       decision: {
         groupBy: none,

@@ -146,7 +146,18 @@ export type DisputeDecisionRecord = DecisionOrderFields & {
   createdAt: string
 }
 
+/** Today's Claude API calls (UTC day) against the budget. */
+export type ClaudeUsage = {
+  day: string
+  calls: number
+  limit: number
+  perUserLimit: number
+  usersAtLimit: number
+  busiestUserCalls: number
+}
+
 export type AdminDashboard = {
+  claudeUsage: ClaudeUsage
   pendingDisputeDecisions: PendingDisputeDecision[]
   escalatedDisputes: EscalatedDispute[]
   riskDecisions: RiskDecisionRecord[]

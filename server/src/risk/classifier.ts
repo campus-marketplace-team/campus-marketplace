@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { LISTING_LIMITS } from "@campus/shared";
 import { z } from "zod";
+import { callClaude, CLAUDE_CALL_CAPS, type ClaudeBudget, ClaudeBudgetExceededError, ClaudeBudgetUnavailableError, type CreateMessage } from "../ai/claude.js";
 import type { Db } from "../db.js";
 import { computeRiskFeatures, orderChatWhere, type RiskFeatures } from "./features.js";
 
@@ -10,10 +12,17 @@ import { computeRiskFeatures, orderChatWhere, type RiskFeatures } from "./featur
 
 export const RISK_MODEL = "claude-opus-5-5";
 
-/** Newest messages sent to the model, so a flood of chat can't run up the bill. Features still cover every message. */
-export const MAX_CHAT_MESSAGES = 100;
+// Input caps, so a flood of long text can't run up the bill. Features still cover every message.
+/** Newest messages sent to the model. */
+export const MAX_CHAT_MESSAGES = 50;
+/** One message's length. Long enough for any real message, and it stops a few padded ones from pushing the rest out. */
+export const MAX_CHAT_MESSAGE_CHARS = 1000;
+/** All messages together, as encoded for the prompt, where a "<" takes six characters. */
+export const MAX_CHAT_TOTAL_CHARS = 8000;
+/** Hard-rule hits listed in the prompt. The policy layer still gets them all. */
+export const MAX_PROMPT_PHRASE_HITS = 50;
+const TRUNCATED_MARK = " [truncated]";
 
-const MAX_TOKENS = 2048;
 // This runs before checkout, so a slow answer has to give up rather than hold up the buyer.
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 1;
@@ -70,7 +79,7 @@ export type RiskInput = {
   omittedChatMessages: number;
 };
 
-export type RiskFallbackReason = "llm_error" | "refusal" | "truncated" | "invalid_output";
+export type RiskFallbackReason = "llm_error" | "refusal" | "truncated" | "invalid_output" | "budget_exceeded" | "budget_unavailable";
 
 export type RiskClassification = RiskAssessment & {
   source: "llm" | "fallback";
@@ -108,8 +117,46 @@ export function encodeForPrompt(value: unknown): string {
   return JSON.stringify(value).replaceAll("<", "\\u003c");
 }
 
+function clip(text: string, max: number) {
+  return text.length <= max ? text : text.slice(0, max - TRUNCATED_MARK.length) + TRUNCATED_MARK;
+}
+
+/**
+ * Applies the input caps: long text is cut, and only the newest messages that fit
+ * are kept. Running it again changes nothing.
+ */
+export function capRiskInput(input: RiskInput): RiskInput {
+  const kept: RiskInput["chat"] = [];
+  let chars = 0;
+  for (const message of input.chat.slice(-MAX_CHAT_MESSAGES).reverse()) {
+    const body = clip(message.body, MAX_CHAT_MESSAGE_CHARS);
+    chars += encodeForPrompt(body).length;
+    if (chars > MAX_CHAT_TOTAL_CHARS) break;
+    kept.unshift({ ...message, body });
+  }
+  return {
+    ...input,
+    listing: {
+      ...input.listing,
+      title: clip(input.listing.title, LISTING_LIMITS.titleMax),
+      description: clip(input.listing.description, LISTING_LIMITS.descriptionMax),
+    },
+    chat: kept,
+    omittedChatMessages: input.omittedChatMessages + input.chat.length - kept.length,
+  };
+}
+
 export function buildRiskPrompt({ listing, features, chat, omittedChatMessages }: RiskInput): string {
-  const facts = { category: listing.category, listingPriceCents: listing.priceCents, currency: listing.currency, omittedChatMessages, ...features };
+  const { offPlatformPhrases } = features;
+  const facts = {
+    category: listing.category,
+    listingPriceCents: listing.priceCents,
+    currency: listing.currency,
+    omittedChatMessages,
+    ...features,
+    offPlatformPhrases: offPlatformPhrases.slice(-MAX_PROMPT_PHRASE_HITS),
+    offPlatformPhraseCount: offPlatformPhrases.length,
+  };
   return [
     `<facts>\n${encodeForPrompt(facts)}\n</facts>`,
     `<untrusted_listing>\n${encodeForPrompt({ title: listing.title, description: listing.description })}\n</untrusted_listing>`,
@@ -120,25 +167,16 @@ export function buildRiskPrompt({ listing, features, chat, omittedChatMessages }
 
 // ---------- Claude call ----------
 
-type CreateMessage = (
-  params: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming,
-  options: { timeout: number; maxRetries: number },
-) => Promise<Anthropic.Beta.Messages.BetaMessage>;
-
-let client: Anthropic | undefined;
-
-// Created on first use, so importing this file doesn't need ANTHROPIC_API_KEY.
-const createWithClaude: CreateMessage = (params, options) => {
-  client ??= new Anthropic();
-  return client.beta.messages.create(params, options);
-};
-
 function fallback(fallbackReason: RiskFallbackReason, detail: string, model: string, rawOutput: string | null): RiskClassification {
   // The detail holds only error classes and schema paths, never listing or chat text.
   console.warn(`[risk] classifier fell back to medium (${fallbackReason}): ${detail}`);
   return {
     risk: "medium",
-    reasons: ["The automated risk check could not produce a valid result, so this order is treated as medium risk."],
+    reasons: [
+      fallbackReason === "budget_exceeded"
+        ? "The daily limit for automated risk checks was reached, so this order is treated as medium risk."
+        : "The automated risk check could not produce a valid result, so this order is treated as medium risk.",
+    ],
     signals: [],
     source: "fallback",
     fallbackReason,
@@ -153,27 +191,31 @@ function describeError(err: unknown): string {
 }
 
 /**
- * Asks Claude to classify an order. Never throws: API errors, refusals and
- * output that fails validation all come back as medium risk, with `source` and
- * `fallbackReason` saying what happened.
+ * Asks Claude to classify an order. Never throws: API errors, refusals, output
+ * that fails validation and a used-up budget all come back as medium risk, with
+ * `source` and `fallbackReason` saying what happened.
  */
-export async function classifyRisk(input: RiskInput, { createMessage = createWithClaude }: { createMessage?: CreateMessage } = {}): Promise<RiskClassification> {
+export async function classifyRisk(input: RiskInput, { budget, createMessage }: { budget: ClaudeBudget; createMessage?: CreateMessage }): Promise<RiskClassification> {
   let response: Anthropic.Beta.Messages.BetaMessage;
   try {
-    response = await createMessage(
+    response = await callClaude(
+      "risk_classifier",
+      budget,
       {
         model: RISK_MODEL,
-        max_tokens: MAX_TOKENS,
         // A safety decline on the requested model is re-run on another one instead of ending as a fallback.
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         output_config: { effort: "low", format: OUTPUT_FORMAT },
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: buildRiskPrompt(input) }],
+        messages: [{ role: "user", content: buildRiskPrompt(capRiskInput(input)) }],
       },
       { timeout: REQUEST_TIMEOUT_MS, maxRetries: MAX_RETRIES },
+      createMessage,
     );
   } catch (err) {
+    if (err instanceof ClaudeBudgetExceededError) return fallback("budget_exceeded", err.scope, RISK_MODEL, null);
+    if (err instanceof ClaudeBudgetUnavailableError) return fallback("budget_unavailable", err.message, RISK_MODEL, null);
     return fallback("llm_error", describeError(err), RISK_MODEL, null);
   }
 
@@ -182,7 +224,7 @@ export async function classifyRisk(input: RiskInput, { createMessage = createWit
   const rawOutput = text || null;
 
   if (response.stop_reason === "refusal") return fallback("refusal", `category ${response.stop_details?.category ?? "none"}`, model, rawOutput);
-  if (response.stop_reason === "max_tokens") return fallback("truncated", `hit max_tokens ${MAX_TOKENS}`, model, rawOutput);
+  if (response.stop_reason === "max_tokens") return fallback("truncated", `hit max_tokens ${CLAUDE_CALL_CAPS.risk_classifier.maxTokens}`, model, rawOutput);
 
   let parsed: unknown;
   try {
@@ -223,7 +265,8 @@ export async function loadRiskInput(db: Db, orderId: string, now: Date = new Dat
     db.chatMessage.count({ where }),
   ]);
 
-  return {
+  // Capped here too, so the decision record lists exactly the messages the model saw.
+  return capRiskInput({
     listing: order.listing,
     features,
     chat: newestFirst.reverse().map(({ id, senderId, body }) => ({
@@ -232,5 +275,5 @@ export async function loadRiskInput(db: Db, orderId: string, now: Date = new Dat
       body,
     })),
     omittedChatMessages: totalMessages - newestFirst.length,
-  };
+  });
 }

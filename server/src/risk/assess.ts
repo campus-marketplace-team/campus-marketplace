@@ -1,3 +1,4 @@
+import type { ClaudeBudget } from "../ai/claude.js";
 import { type Db, prisma } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { transition } from "../orders/stateMachine.js";
@@ -9,7 +10,7 @@ import { applyRiskPolicy, type RiskOutcome } from "./policy.js";
 // → policy, then saves the decision. A block and its decision commit together.
 
 /** Replaceable so tests never call the real classifier. */
-export type Classify = (input: RiskInput) => Promise<RiskClassification>;
+export type Classify = (input: RiskInput, budget: ClaudeBudget) => Promise<RiskClassification>;
 
 /**
  * Clicking Pay again reuses a decision this recent if nothing it read has
@@ -63,7 +64,8 @@ export async function assessOrderRisk(orderId: string, { classify, now = new Dat
   if (reusable) return reusable;
 
   const input = await loadRiskInput(prisma, orderId, now);
-  const classification = await classify(input);
+  // Charged to the buyer, whose click on Pay caused the call.
+  const classification = await classify(input, { userId: order.buyerId });
   const decision = applyRiskPolicy(input.features, classification);
 
   // Not inside a transaction with the classifier call, which can take many seconds.
