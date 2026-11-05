@@ -152,6 +152,18 @@ describe("POST /api/orders/:id/handoff-token (seller)", () => {
 });
 
 describe("POST /api/orders/handoff/scan (rejections: nothing used up, PayPal not called)", () => {
+  it("logs the client IP from True-Client-IP", async () => {
+    const order = await createAuthorizedOrder();
+    const { token } = await issue(order.id);
+    const res = await fetch(`${api.url}/orders/handoff/scan`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${otherToken}`, "Content-Type": "application/json", "True-Client-IP": "203.0.113.9", "X-Forwarded-For": "10.0.0.1" },
+      body: JSON.stringify({ token }),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect((await scansFor(order.id)).map((s) => s.ip)).toEqual(["203.0.113.9"]);
+  });
+
   it("needs a login", async () => {
     const order = await createAuthorizedOrder();
     const { token } = await issue(order.id);

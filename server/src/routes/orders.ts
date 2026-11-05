@@ -1,6 +1,7 @@
 import express, { Router, type Response } from "express";
 import { LISTING_LIMITS } from "@campus/shared";
 import { requireAuth } from "../auth/middleware.js";
+import { getClientIp } from "../http/clientIp.js";
 import { authorizeCheckout, CheckoutError, startCheckout } from "../orders/checkout.js";
 import { addDisputePhoto, openDispute } from "../orders/dispute.js";
 import { issueHandoffToken, redeemHandoffToken } from "../orders/handoff.js";
@@ -83,7 +84,7 @@ export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Clas
   router.post("/handoff/scan", (req, res) =>
     handle(res, async (paypal) => ({
       order: await redeemHandoffToken(paypal, req.user!.id, req.body?.token, {
-        ip: req.ip ?? null,
+        ip: getClientIp(req) ?? null,
         userAgent: req.get("user-agent") ?? null,
       }),
     })),

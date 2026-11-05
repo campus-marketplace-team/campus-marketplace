@@ -1,5 +1,5 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
-import { createRateLimiter, type RateLimits } from "./http/rateLimit.js";
+import { createRateLimiters, type RateLimits } from "./http/rateLimit.js";
 import { getPayPalClient, type PayPalClient } from "./paypal/client.js";
 import type { Classify } from "./risk/assess.js";
 import { classifyRisk } from "./risk/classifier.js";
@@ -55,7 +55,7 @@ export function createApp({
   rateLimits,
 }: { paypal?: () => PayPalClient; classify?: Classify; rateLimits?: Partial<RateLimits> } = {}) {
   const app = express();
-  // Render puts one proxy in front of us; trust it so req.ip is the real client IP (scan logs, rate limits).
+  // Render puts a proxy in front of us. Only a fallback for getClientIp, which prefers True-Client-IP.
   app.set("trust proxy", 1);
 
   const allowedOrigins = (process.env.CORS_ORIGINS ?? "")
@@ -73,8 +73,10 @@ export function createApp({
     res.json({ ok: true });
   });
 
-  app.use("/api", createRateLimiter(rateLimits));
+  const limiters = createRateLimiters(rateLimits);
+  app.use("/api", limiters.beforeBody);
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
+  app.use("/api", limiters.afterBody);
 
   app.use("/api/auth", authRouter);
   app.use("/api/listings", listingsRouter);
