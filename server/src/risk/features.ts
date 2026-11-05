@@ -122,6 +122,21 @@ export type RiskFeatures = {
 };
 
 /**
+ * An order's buyer/seller chat up to `now`. By listing and participants: the
+ * chat API doesn't set chat_messages.order_id.
+ */
+export function orderChatWhere({ listingId, buyerId, sellerId }: { listingId: string; buyerId: string; sellerId: string }, now: Date) {
+  return {
+    listingId,
+    createdAt: { lte: now },
+    OR: [
+      { senderId: buyerId, recipientId: sellerId },
+      { senderId: sellerId, recipientId: buyerId },
+    ],
+  };
+}
+
+/**
  * Computes an order's risk features as of `now`. Read-only; takes a transaction
  * client so the caller can combine it with its own writes.
  */
@@ -156,16 +171,8 @@ export async function computeRiskFeatures(db: Db, orderId: string, now: Date = n
     }),
     db.dispute.count({ where: { orderId: { not: orderId }, order: { sellerId }, createdAt: { lte: now } } }),
     db.dispute.count({ where: { orderId: { not: orderId }, openedById: buyerId, createdAt: { lte: now } } }),
-    // By listing and participants: the chat API doesn't set chat_messages.order_id.
     db.chatMessage.findMany({
-      where: {
-        listingId,
-        createdAt: { lte: now },
-        OR: [
-          { senderId: buyerId, recipientId: sellerId },
-          { senderId: sellerId, recipientId: buyerId },
-        ],
-      },
+      where: orderChatWhere({ listingId, buyerId, sellerId }, now),
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { id: true, senderId: true, body: true },
     }),

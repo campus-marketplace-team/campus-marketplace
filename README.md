@@ -164,6 +164,7 @@ Names only; see each `.env.example` for what goes in them. Never commit real val
 | `CORS_ORIGINS` | Allowed browser origins (leave empty locally) |
 | `API_PUBLIC_URL` | Public API URL, used in verification links |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET` | Listing photo storage |
+| `ANTHROPIC_API_KEY` | Claude API key for the LLM risk classifier |
 
 **`client/.env`**
 

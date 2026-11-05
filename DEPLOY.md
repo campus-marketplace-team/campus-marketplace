@@ -59,6 +59,7 @@ The build installs all workspaces (which also builds `shared/`), then runs `pris
 | `SUPABASE_URL` | Supabase project URL, e.g. `https://abcd.supabase.co` (Project Settings → API) | No |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase secret / service_role key. Server only; it bypasses all access rules | Yes |
 | `SUPABASE_STORAGE_BUCKET` | `listing-photos` (optional; that's the default) | No |
+| `ANTHROPIC_API_KEY` | Claude API key for the LLM risk classifier. Without it every order is classified as medium risk | Yes |
 | `NODE_VERSION` | `24` | No |
 
 Without the two Supabase variables the API still runs, but photo uploads answer 503. Likewise, without all three `PAYPAL_*` variables checkout answers 503.
