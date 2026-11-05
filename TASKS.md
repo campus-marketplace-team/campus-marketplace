@@ -138,7 +138,7 @@ Goal: webhooks, deadlines, payouts and retries all run without anyone clicking a
 ## Phase 4 — AI risk engine and dispute agent (Nov 2–7)
 Goal: every order gets a risk decision before payment, and complaints are resolved by an agent that proposes and a human approves.
 
-- [ ] **4.1 Risk features**
+- [x] **4.1 Risk features** (server/src/risk/features.ts: computeRiskFeatures(db, orderId, now) returns seller account age, seller listings in the last 24 h, amount vs category median (other sellers' non-removed listings, same currency, null under 3 comparables), seller + buyer past disputes, off-platform payment phrases in the order's chat; findOffPlatformPhrases catches spacing, leetspeak, lookalike and invisible-character evasion. Output holds only numbers and ids, no listing or chat text. Not called from checkout yet (4.3). Tests in server/test/riskFeatures.test.ts. No migration, no new env vars.)
   > Read CLAUDE.md. Build deterministic risk features for an order: seller account age, listings posted in the last 24 hours, price vs category median, past disputes, and off-platform payment phrases in chat (e-transfer, cash app, etc.). When done, tick task 4.1 in TASKS.md.
 
 - [ ] **4.2 LLM risk classifier**
