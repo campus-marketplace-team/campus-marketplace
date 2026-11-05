@@ -104,7 +104,7 @@ Give one to five short reasons (under 200 characters each) in your own words. De
  * JSON with "<" escaped, so untrusted text can't write a closing tag and appear
  * to step outside its section. Parsing the JSON gets the original text back.
  */
-function encodeForPrompt(value: unknown): string {
+export function encodeForPrompt(value: unknown): string {
   return JSON.stringify(value).replaceAll("<", "\\u003c");
 }
 
