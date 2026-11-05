@@ -53,6 +53,7 @@ export type WebhookOrder = {
   version: number;
   amountCents: number;
   platformFeeCents: number;
+  refundedCents: number;
   currency: string;
   paypalOrderId: string | null;
   paypalAuthorizationId: string | null;
@@ -87,6 +88,7 @@ const orderSelect = {
   version: true,
   amountCents: true,
   platformFeeCents: true,
+  refundedCents: true,
   currency: true,
   paypalOrderId: true,
   paypalAuthorizationId: true,

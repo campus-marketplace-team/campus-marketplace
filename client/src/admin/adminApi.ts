@@ -1,4 +1,4 @@
-import type { OrderState } from '@campus/shared'
+import type { DisputeAction, OrderState } from '@campus/shared'
 import { api } from '../api/client'
 
 // Mirrors GET /api/admin/dashboard (server/src/admin/dashboard.ts). Dates arrive as ISO strings.
@@ -51,7 +51,47 @@ export type DeadLetter = {
   createdAt: string
 }
 
+export type DisputeOrder = {
+  id: string
+  amountCents: number
+  platformFeeCents: number
+  currency: string
+  listingTitle: string
+  buyer: string
+  seller: string
+}
+
+/** A dispute agent decision waiting for an admin. Reasoning and evidence can quote untrusted text. */
+export type PendingDisputeDecision = {
+  id: string
+  outcome: DisputeAction
+  amountCents: number | null
+  reasoning: string | null
+  evidence: { source: string; detail: string }[] | null
+  model: string | null
+  createdAt: string
+  order: DisputeOrder
+}
+
+export type EscalatedDispute = {
+  id: string
+  reason: string
+  description: string | null
+  createdAt: string
+  order: DisputeOrder
+}
+
+/** Where a decision ended up after approving or deciding it. APPROVED means PayPal's answer is unknown and the worker is retrying. */
+export type DisputeDecisionResult = {
+  id: string
+  actionStatus: 'PENDING_APPROVAL' | 'APPROVED' | 'EXECUTED' | 'REJECTED' | 'FAILED'
+  actionError: string | null
+  paypalTransactionId: string | null
+}
+
 export type AdminDashboard = {
+  pendingDisputeDecisions: PendingDisputeDecision[]
+  escalatedDisputes: EscalatedDispute[]
   generatedAt: string
   money: MoneyTotals
   ordersByState: { state: OrderState; count: number }[]
@@ -65,4 +105,18 @@ export type AdminDashboard = {
 
 export function fetchAdminDashboard(signal?: AbortSignal) {
   return api<AdminDashboard>('/api/admin/dashboard', { signal })
+}
+
+type DecisionResponse = { decision: DisputeDecisionResult }
+
+export function approveDisputeDecision(id: string) {
+  return api<DecisionResponse>(`/api/admin/dispute-decisions/${id}/approve`, { method: 'POST' })
+}
+
+export function rejectDisputeDecision(id: string) {
+  return api<DecisionResponse>(`/api/admin/dispute-decisions/${id}/reject`, { method: 'POST', body: {} })
+}
+
+export function resolveEscalatedDispute(orderId: string, body: { action: 'REFUND' | 'PARTIAL_REFUND' | 'RELEASE'; refundCents?: number; reasoning: string }) {
+  return api<DecisionResponse>(`/api/admin/disputes/${orderId}/resolve`, { method: 'POST', body })
 }

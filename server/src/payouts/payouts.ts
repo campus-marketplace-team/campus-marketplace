@@ -29,6 +29,14 @@ import { type PayPalClient, PayPalError } from "../paypal/client.js";
 //     retried with a new batch id.
 //
 // A seller without a PayPal email (users.paypal_email) isn't paid until they set one.
+//
+// A dispute decided for the seller joins the same flow: RELEASED and PARTIAL_REFUND
+// orders have been captured and go to PAYOUT_PENDING like CAPTURED ones, for the
+// sale minus the fee and whatever was refunded (src/disputes/actionTools.ts).
+
+/** States whose capture is recorded and whose seller hasn't been sent a payout yet. */
+const READY_TO_PAY = ["CAPTURED", "RELEASED", "PARTIAL_REFUND"] as const;
+type ReadyToPay = (typeof READY_TO_PAY)[number];
 
 export const MAX_PAYOUT_ATTEMPTS = 5;
 /** Wait before attempt n+1 after attempt n failed: 10 min · 2^(n−1). */
@@ -50,6 +58,7 @@ export type PayoutOrder = {
   version: number;
   amountCents: number;
   platformFeeCents: number;
+  refundedCents: number;
   currency: string;
   payoutAttempts: number;
 };
@@ -65,9 +74,9 @@ export type PayoutOutcome =
 
 export type PayoutSweepResult = { checked: number } & Record<PayoutOutcome, number>;
 
-/** What the seller receives: the sale minus our fee. */
-export function payoutCents(order: { amountCents: number; platformFeeCents: number }) {
-  return order.amountCents - order.platformFeeCents;
+/** What the seller receives: the sale minus our fee and anything a dispute decision refunded. */
+export function payoutCents(order: { amountCents: number; platformFeeCents: number; refundedCents: number }) {
+  return order.amountCents - order.platformFeeCents - order.refundedCents;
 }
 
 /** When to send the next attempt after `attempts` failed ones; null once MAX_PAYOUT_ATTEMPTS have failed. */
@@ -146,6 +155,7 @@ const payoutSelect = {
   version: true,
   amountCents: true,
   platformFeeCents: true,
+  refundedCents: true,
   currency: true,
   payoutAttempts: true,
   payoutNextAttemptAt: true,
@@ -178,7 +188,7 @@ async function reschedule(order: LoadedOrder, at: Date, lastError: string | null
   });
 }
 
-/** Moves CAPTURED / PAYOUT_RETRY → PAYOUT_PENDING with the next attempt number, then sends it. */
+/** Moves a ready order / PAYOUT_RETRY → PAYOUT_PENDING with the next attempt number, then sends it. */
 async function startAttempt(paypal: PayPalClient, order: LoadedOrder, now: Date): Promise<PayoutOutcome> {
   const receiver = order.seller.paypalEmail;
   if (!receiver) return "waiting";
@@ -188,7 +198,7 @@ async function startAttempt(paypal: PayPalClient, order: LoadedOrder, now: Date)
   let version: number;
   try {
     ({ version } = await prisma.$transaction((tx) =>
-      transition(tx, order.id, order.state as "CAPTURED" | "PAYOUT_RETRY", "PAYOUT_PENDING", order.version, {
+      transition(tx, order.id, order.state as ReadyToPay | "PAYOUT_RETRY", "PAYOUT_PENDING", order.version, {
         payoutAttempts: attempt,
         // If we crash before recording the send, the next sweep re-sends this attempt.
         payoutNextAttemptAt: new Date(now.getTime() + PAYOUT_RESEND_AFTER_MS),
@@ -309,7 +319,7 @@ export async function processPayout(paypal: PayPalClient, orderId: string, now =
   const order = await loadOrder(orderId);
   if (!order) return "skipped";
   try {
-    if (order.state === "CAPTURED" && order.capturedAt && order.capturedAt <= now) {
+    if ((READY_TO_PAY as readonly string[]).includes(order.state) && order.capturedAt && order.capturedAt <= now) {
       return await startAttempt(paypal, order, now);
     }
     const due = order.payoutNextAttemptAt !== null && order.payoutNextAttemptAt <= now;
@@ -336,7 +346,7 @@ export async function sweepPayouts(
   const due = await prisma.order.findMany({
     where: {
       OR: [
-        { state: "CAPTURED", capturedAt: { lte: now }, seller: { paypalEmail: { not: null } } },
+        { state: { in: [...READY_TO_PAY] }, capturedAt: { lte: now }, seller: { paypalEmail: { not: null } } },
         { state: "PAYOUT_RETRY", payoutAttempts: { lt: MAX_PAYOUT_ATTEMPTS }, payoutNextAttemptAt: { lte: now } },
         { state: "PAYOUT_PENDING", payoutNextAttemptAt: { lte: now } },
       ],

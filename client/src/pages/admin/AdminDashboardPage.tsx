@@ -23,10 +23,12 @@ import { Alert, Button } from '../../components'
 import { Page } from '../../layout/Page'
 import { formatPrice } from '../../listings/format'
 import { ORDER_STATE_LABELS } from '../../orders/orderStatus'
+import { DisputeQueues } from './DisputeQueues'
 import './admin.css'
 
 // Admin dashboard: orders by state, money held / captured / paid out from the
-// ledger, reconciliation mismatches and dead-lettered outbox rows. Read-only.
+// ledger, reconciliation mismatches and dead-lettered outbox rows, all read-only,
+// plus the dispute approval gate (DisputeQueues.tsx).
 // Refreshes every 30 s. All cells render as plain text (no HTML), since
 // messages and payloads can contain anything.
 
@@ -92,7 +94,7 @@ export function AdminDashboardPage() {
           Loading…
         </p>
       )}
-      {data && <Dashboard data={data} stateFilter={stateFilter} onStateFilter={setStateFilter} />}
+      {data && <Dashboard data={data} stateFilter={stateFilter} onStateFilter={setStateFilter} onChanged={() => void load()} />}
     </Page>
   )
 }
@@ -101,10 +103,12 @@ function Dashboard({
   data,
   stateFilter,
   onStateFilter,
+  onChanged,
 }: {
   data: AdminDashboard
   stateFilter: OrderState | null
   onStateFilter: (s: OrderState | null) => void
+  onChanged: () => void
 }) {
   const orders = useMemo(
     () => (stateFilter ? data.orders.filter((o) => o.state === stateFilter) : data.orders),
@@ -113,6 +117,8 @@ function Dashboard({
 
   return (
     <div className="admin">
+      <DisputeQueues pending={data.pendingDisputeDecisions} escalated={data.escalatedDisputes} onChanged={onChanged} />
+
       <section aria-labelledby="money-heading">
         <h2 id="money-heading" className="admin__heading">
           Money (from the ledger)

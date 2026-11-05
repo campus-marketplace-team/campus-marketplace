@@ -7,9 +7,10 @@ import { type OverdueOrder, voidAndRecord, voidOverdueOrder } from "./handoffDea
 // has a 3-day honor period (capture inside it, or the capture may fail) and
 // expires after 29 days. Orders still holding an authorization after the
 // honor period are normally handled by the 72-hour deadline job; this job
-// covers the ones that outlive it, e.g. an order sitting IN_DISPUTE.
+// covers the ones that outlive it, e.g. an order sitting IN_DISPUTE. ESCALATED
+// orders are treated like IN_DISPUTE: the money stays held until an admin decides.
 //
-// For each AUTHORIZED / IN_DISPUTE order, every few minutes:
+// For each AUTHORIZED / IN_DISPUTE / ESCALATED order, every few minutes:
 //   - within EXPIRY_MARGIN_MS of the 29-day expiry: it can't be kept alive.
 //     AUTHORIZED → void and notify both sides. IN_DISPUTE can't be voided by
 //     the state machine, so both sides (and the logs) are told it needs
@@ -36,6 +37,9 @@ export const TOO_SOON_RETRY_MS = 60 * 60 * 1000;
 export const EXPIRY_BATCH_SIZE = 20;
 
 export const AUTHORIZATION_EXPIRING_NOTIFICATION = "AUTHORIZATION_EXPIRING";
+
+const AWAITING_DECISION = ["IN_DISPUTE", "ESCALATED"] as const;
+const HOLDING = ["AUTHORIZED", ...AWAITING_DECISION] as const;
 
 export type ExpiryOutcome =
   | "reauthorized" // new authorization saved, new honor period
@@ -85,7 +89,7 @@ type ExpiryOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
 
 function loadOrder(id: string) {
   return prisma.order.findFirst({
-    where: { id, state: { in: ["AUTHORIZED", "IN_DISPUTE"] }, paypalAuthorizationId: { not: null } },
+    where: { id, state: { in: [...HOLDING] }, paypalAuthorizationId: { not: null } },
     select: orderSelect,
   });
 }
@@ -130,7 +134,7 @@ async function reauthorize(paypal: PayPalClient, order: ExpiryOrder, now: Date):
       return "failed";
     }
     console.error(`order ${order.id}: PayPal refused to reauthorize: ${detail}`);
-    if (order.state === "IN_DISPUTE") return flagDispute(order, `PayPal refused to reauthorize (${err.issue ?? err.status})`);
+    if (order.state !== "AUTHORIZED") return flagDispute(order, `PayPal refused to reauthorize (${err.issue ?? err.status})`);
     return voidAndRecord(paypal, asOverdue(order), now, { notify: VOID_MESSAGES.refused });
   }
 
@@ -147,7 +151,7 @@ async function reauthorize(paypal: PayPalClient, order: ExpiryOrder, now: Date):
   const expiresAt = order.authorizationExpiresAt;
   const { count } = await prisma.order.updateMany({
     // Only if nothing changed meanwhile (e.g. a capture against the old id).
-    where: { id: order.id, paypalAuthorizationId: oldId, state: { in: ["AUTHORIZED", "IN_DISPUTE"] } },
+    where: { id: order.id, paypalAuthorizationId: oldId, state: { in: [...HOLDING] } },
     data: {
       paypalAuthorizationId: renewed.authorizationId,
       honorPeriodEndsAt: expiresAt && expiresAt < honorEnds ? expiresAt : honorEnds,
@@ -172,7 +176,7 @@ export async function handleExpiringAuthorization(paypal: PayPalClient, orderId:
     const nearExpiry = order.authorizationExpiresAt !== null && order.authorizationExpiresAt.getTime() - EXPIRY_MARGIN_MS <= now.getTime();
     const honorOver = order.honorPeriodEndsAt !== null && order.honorPeriodEndsAt.getTime() + REAUTHORIZE_AFTER_HONOR_MS <= now.getTime();
     const handoffPending =
-      order.state === "IN_DISPUTE" || (order.handoffDeadline !== null && order.handoffDeadline.getTime() > now.getTime());
+      order.state !== "AUTHORIZED" || (order.handoffDeadline !== null && order.handoffDeadline.getTime() > now.getTime());
 
     if (order.state === "AUTHORIZED" && !handoffPending) {
       // Past its handoff deadline: void it the deadline job's way (with its grace period and message).
@@ -208,7 +212,7 @@ export async function sweepExpiringAuthorizations(
       paypalAuthorizationId: { not: null },
       OR: [
         {
-          state: { in: ["AUTHORIZED", "IN_DISPUTE"] },
+          state: { in: [...HOLDING] },
           honorPeriodEndsAt: { lte: new Date(now.getTime() - REAUTHORIZE_AFTER_HONOR_MS) },
           // Past PayPal's expiry there's nothing left to reauthorize.
           OR: [{ authorizationExpiresAt: null }, { authorizationExpiresAt: { gt: now } }],
@@ -216,7 +220,7 @@ export async function sweepExpiringAuthorizations(
         { state: "AUTHORIZED", authorizationExpiresAt: { lte: new Date(now.getTime() + EXPIRY_MARGIN_MS) } },
         {
           // Disputes near expiry, until both sides have been told.
-          state: "IN_DISPUTE",
+          state: { in: [...AWAITING_DECISION] },
           authorizationExpiresAt: { lte: new Date(now.getTime() + EXPIRY_MARGIN_MS) },
           notifications: { none: { kind: AUTHORIZATION_EXPIRING_NOTIFICATION } },
         },

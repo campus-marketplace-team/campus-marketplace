@@ -91,6 +91,15 @@ enum DecisionOutcome {
   ESCALATE
 }
 
+// Where a dispute agent decision is. Null on risk decisions.
+enum DecisionActionStatus {
+  PENDING_APPROVAL // waiting for an admin
+  APPROVED // cleared to run (by an admin, or under the limit); retried until PayPal gives a definite answer
+  EXECUTED
+  REJECTED
+  FAILED // PayPal refused it, or it needs a person (see action_error)
+}
+
 enum DisputeStatus {
   OPEN
   PENDING_APPROVAL
@@ -166,8 +175,9 @@ model Order {
   amountCents      Int        @map("amount_cents")
   platformFeeCents Int        @map("platform_fee_cents")
   currency         String     @default("USD") @db.Char(3)
+  refundedCents    Int        @default(0) @map("refunded_cents") // given back by a dispute decision; 0..amount_cents (DB check)
 
-  paypalOrderId         String? @unique @map("paypal_order_id")
+  paypalOrderId        String? @unique @map("paypal_order_id")
   paypalAuthorizationId String? @unique @map("paypal_authorization_id")
   paypalCaptureId       String? @unique @map("paypal_capture_id")
   paypalPayoutBatchId   String? @map("paypal_payout_batch_id")
@@ -288,10 +298,17 @@ model Decision {
   model     String?
 
   amountCents         Int?      @map("amount_cents") // refund amount, capped at amount paid
-  approverId          String?   @map("approver_id") @db.Uuid
+  approverId          String?   @map("approver_id") @db.Uuid // admin who approved or rejected; null with approved_at = under the limit
   approvedAt          DateTime? @map("approved_at") @db.Timestamptz(3)
   paypalTransactionId String?   @map("paypal_transaction_id")
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Dispute agent decisions only (src/disputes/actionTools.ts).
+  actionStatus DecisionActionStatus? @map("action_status")
+  actionError  String?               @map("action_error")
+  rejectedAt   DateTime?             @map("rejected_at") @db.Timestamptz(3)
+  reviewNote   String?               @map("review_note")
+  executedAt   DateTime?             @map("executed_at") @db.Timestamptz(3)
 
   order    Order?   @relation(fields: [orderId], references: [id])
   listing  Listing? @relation(fields: [listingId], references: [id])
@@ -302,6 +319,7 @@ model Decision {
   @@index([listingId])
   @@index([disputeId])
   @@index([kind, createdAt])
+  @@index([actionStatus, approvedAt]) // approval queue, retry sweep
   @@map("decisions")
 }
 

@@ -57,8 +57,10 @@ Legal transitions:
 - AUTHORIZED → VOIDED (deadline passes)
 - AUTHORIZED → IN_DISPUTE (problem reported)
 - IN_DISPUTE → REFUNDED | PARTIAL_REFUND | RELEASED | ESCALATED
+- ESCALATED → REFUNDED | PARTIAL_REFUND | RELEASED (an admin decides)
 - AUTHORIZED → CAPTURED (QR scan verified)
 - CAPTURED → PAYOUT_PENDING → PAID_OUT
+- PARTIAL_REFUND → PAYOUT_PENDING, RELEASED → PAYOUT_PENDING (the seller is paid what the decision leaves them)
 - PAYOUT_PENDING → PAYOUT_RETRY (payout fails)
 - PAYOUT_RETRY → PAYOUT_PENDING (worker re-sends; after 5 failed attempts it stays in PAYOUT_RETRY for an admin)
 

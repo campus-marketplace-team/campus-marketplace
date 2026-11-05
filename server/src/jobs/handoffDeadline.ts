@@ -27,9 +27,9 @@ export const SWEEP_BATCH_SIZE = 50;
 export const ORDER_VOIDED_NOTIFICATION = "ORDER_VOIDED";
 
 // PayPal issues meaning the authorization is already void: nothing left to do at PayPal.
-const ALREADY_VOID = new Set(["PREVIOUSLY_VOIDED", "AUTHORIZATION_VOIDED", "AUTHORIZATION_EXPIRED"]);
+export const ALREADY_VOID = new Set(["PREVIOUSLY_VOIDED", "AUTHORIZATION_VOIDED", "AUTHORIZATION_EXPIRED"]);
 // PayPal issues meaning the money was captured, so it must not be voided here.
-const ALREADY_CAPTURED = new Set(["PREVIOUSLY_CAPTURED", "AUTHORIZATION_ALREADY_CAPTURED"]);
+export const ALREADY_CAPTURED = new Set(["PREVIOUSLY_CAPTURED", "AUTHORIZATION_ALREADY_CAPTURED"]);
 
 export type VoidOutcome =
   | "voided" // voided at PayPal and recorded

@@ -93,7 +93,12 @@ export type PayPalAction =
   | "void"
   | `payout-${number}`
   /** Keyed by the authorization being replaced, so each reauthorization has its own request id. */
-  | `reauthorize-${string}`;
+  | `reauthorize-${string}`
+  /**
+   * A dispute decision's capture or void, keyed by decision and authorization. Not plain
+   * `capture`: a scan may have used that id for the full amount, and PayPal would replay it.
+   */
+  | `dispute-${string}`;
 
 /** PayPal-Request-Id for one action on one of our orders (max 108 chars; ours is 36 + action). */
 export function requestId(orderId: string, action: PayPalAction): string {
@@ -375,16 +380,19 @@ export function createPayPalClient(
 
     /**
      * POST /v2/payments/authorizations/{id}/capture for exactly `amountCents`
-     * (never more than authorized), as the final capture.
+     * (never more than authorized), as the final capture: PayPal releases
+     * anything left on the authorization back to the buyer.
      */
     async captureAuthorization(input: {
       orderId: string;
       authorizationId: string;
       amountCents: number;
       currency?: string;
+      action?: PayPalAction;
     }): Promise<Capture> {
+      const action = input.action ?? "capture";
       const { json } = await call(
-        "capture",
+        action,
         input.orderId,
         `/v2/payments/authorizations/${encodeURIComponent(input.authorizationId)}/capture`,
         {
@@ -392,8 +400,8 @@ export function createPayPalClient(
           final_capture: true,
         },
       );
-      if (typeof json?.id !== "string") invalid("capture", "response had no capture id");
-      return { captureId: json.id, status: String(json.status), ...parseAmount("capture", json.amount) };
+      if (typeof json?.id !== "string") invalid(action, "response had no capture id");
+      return { captureId: json.id, status: String(json.status), ...parseAmount(action, json.amount) };
     },
 
     /**
@@ -555,9 +563,9 @@ export function createPayPalClient(
     getRefund: (input: { refundId: string }) => getPayment("refunds", input.refundId),
 
     /** POST /v2/payments/authorizations/{id}/void. The buyer is never charged. */
-    async voidAuthorization(input: { orderId: string; authorizationId: string }): Promise<{ status: string }> {
+    async voidAuthorization(input: { orderId: string; authorizationId: string; action?: PayPalAction }): Promise<{ status: string }> {
       const { status, json } = await call(
-        "void",
+        input.action ?? "void",
         input.orderId,
         `/v2/payments/authorizations/${encodeURIComponent(input.authorizationId)}/void`,
         undefined,

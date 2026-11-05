@@ -40,9 +40,9 @@ export const LEGAL_TRANSITIONS: Readonly<Record<OrderState, readonly OrderState[
   [S.VOIDED]: [],
   [S.IN_DISPUTE]: [S.REFUNDED, S.PARTIAL_REFUND, S.RELEASED, S.ESCALATED],
   [S.REFUNDED]: [],
-  [S.PARTIAL_REFUND]: [],
-  [S.RELEASED]: [],
-  [S.ESCALATED]: [],
+  [S.PARTIAL_REFUND]: [S.PAYOUT_PENDING], // the seller is paid what's left
+  [S.RELEASED]: [S.PAYOUT_PENDING], // the seller is paid
+  [S.ESCALATED]: [S.REFUNDED, S.PARTIAL_REFUND, S.RELEASED], // an admin decides
   [S.CAPTURED]: [S.PAYOUT_PENDING],
   [S.PAYOUT_PENDING]: [S.PAID_OUT, S.PAYOUT_RETRY], // payout succeeds | payout fails
   [S.PAID_OUT]: [],

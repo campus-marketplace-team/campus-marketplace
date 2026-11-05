@@ -6,6 +6,7 @@ import {
   getPayPalClient,
   outboxHandlers,
   prisma,
+  sweepApprovedDisputeDecisions,
   sweepExpiringAuthorizations,
   sweepHandoffDeadlines,
   sweepPayouts,
@@ -20,6 +21,7 @@ const HANDOFF_DEADLINE_QUEUE = "handoff-deadline";
 const PAYOUTS_QUEUE = "payouts";
 const AUTHORIZATION_EXPIRY_QUEUE = "authorization-expiry";
 const RECONCILIATION_QUEUE = "reconciliation";
+const DISPUTE_DECISIONS_QUEUE = "dispute-decisions";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -74,6 +76,16 @@ await boss.schedule(RECONCILIATION_QUEUE, "*/5 * * * *"); // every 5 minutes
 await boss.work(RECONCILIATION_QUEUE, async () => {
   const result = await sweepReconciliation(paypal);
   if (result.flagged > 0 || result.failed > 0) console.log("reconciliation sweep:", result);
+  return result;
+});
+
+// Approved dispute decisions PayPal hasn't given a definite answer on: re-send with the same request id.
+await boss.createQueue(DISPUTE_DECISIONS_QUEUE, { policy: "stately", retryLimit: 2, expireInSeconds: 600 });
+await boss.schedule(DISPUTE_DECISIONS_QUEUE, "* * * * *"); // every minute
+
+await boss.work(DISPUTE_DECISIONS_QUEUE, async () => {
+  const result = await sweepApprovedDisputeDecisions(paypal);
+  if (result.checked > 0) console.log("dispute-decisions sweep:", result);
   return result;
 });
 

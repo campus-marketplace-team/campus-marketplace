@@ -9,7 +9,7 @@ import { prisma } from "../db.js";
 // plus seller_payable (owed to sellers) and platform_fees (ours).
 
 /** Rows per grid; the totals cover everything. */
-export const DASHBOARD_LIMITS = { orders: 500, flags: 200, deadLetters: 200 } as const;
+export const DASHBOARD_LIMITS = { orders: 500, flags: 200, deadLetters: 200, disputes: 100 } as const;
 const MAX_PAYLOAD_PREVIEW = 500;
 
 export type MoneyTotals = { held: number; captured: number; paidOut: number; sellerPayable: number; platformFees: number };
@@ -22,8 +22,48 @@ function moneyFrom(sums: { account: string; _sum: { amountCents: number | null }
   return { held: balance("escrow_held"), captured: sellerPayable + platformFees + paidOut, paidOut, sellerPayable, platformFees };
 }
 
+const disputeOrderView = {
+  select: {
+    id: true,
+    amountCents: true,
+    platformFeeCents: true,
+    currency: true,
+    listing: { select: { title: true } },
+    buyer: { select: { displayName: true } },
+    seller: { select: { displayName: true } },
+  },
+} as const;
+
+type DisputeOrderRow = { id: string; amountCents: number; platformFeeCents: number; currency: string; listing: { title: string }; buyer: { displayName: string }; seller: { displayName: string } };
+
+function flattenDisputeOrder({ listing, buyer, seller, ...order }: DisputeOrderRow) {
+  return { ...order, listingTitle: listing.title, buyer: buyer.displayName, seller: seller.displayName };
+}
+
+/** Dispute decisions waiting for an admin, and escalated disputes for an admin to decide. Reasoning and reports are untrusted text: shown as plain text only. */
+async function getDisputeQueues() {
+  const [pending, escalated] = await Promise.all([
+    prisma.decision.findMany({
+      where: { kind: "DISPUTE", actionStatus: "PENDING_APPROVAL" },
+      orderBy: { createdAt: "asc" },
+      take: DASHBOARD_LIMITS.disputes,
+      select: { id: true, outcome: true, amountCents: true, reasoning: true, evidence: true, model: true, createdAt: true, order: disputeOrderView },
+    }),
+    prisma.dispute.findMany({
+      where: { status: "ESCALATED" },
+      orderBy: { createdAt: "asc" },
+      take: DASHBOARD_LIMITS.disputes,
+      select: { id: true, reason: true, description: true, createdAt: true, order: disputeOrderView },
+    }),
+  ]);
+  return {
+    pendingDisputeDecisions: pending.flatMap(({ order, ...d }) => (order ? [{ ...d, order: flattenDisputeOrder(order) }] : [])),
+    escalatedDisputes: escalated.map(({ order, ...d }) => ({ ...d, order: flattenDisputeOrder(order) })),
+  };
+}
+
 export async function getAdminDashboard() {
-  const [stateGroups, accountSums, orderCount, orders, flags, openFlagCount, deadLetters, deadLetterCount] = await Promise.all([
+  const [stateGroups, accountSums, orderCount, orders, flags, openFlagCount, deadLetters, deadLetterCount, disputeQueues] = await Promise.all([
     prisma.order.groupBy({ by: ["state"], _count: { _all: true } }),
     prisma.ledgerEntry.groupBy({ by: ["account"], _sum: { amountCents: true } }),
     prisma.order.count(),
@@ -69,6 +109,7 @@ export async function getAdminDashboard() {
       select: { id: true, orderId: true, topic: true, attempts: true, lastError: true, payload: true, createdAt: true },
     }),
     prisma.outboxEvent.count({ where: { status: "DEAD" } }),
+    getDisputeQueues(),
   ]);
 
   // Per-order ledger totals for the rows shown.
@@ -98,6 +139,7 @@ export async function getAdminDashboard() {
     // Payloads are shown as text, cut short; they're our own outbox data, never rendered as HTML.
     deadLetters: deadLetters.map(({ payload, ...d }) => ({ ...d, payload: JSON.stringify(payload).slice(0, MAX_PAYLOAD_PREVIEW) })),
     deadLetterCount,
+    ...disputeQueues,
   };
 }
 

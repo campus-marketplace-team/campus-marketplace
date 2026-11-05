@@ -70,6 +70,7 @@ const orderSelect = {
   version: true,
   amountCents: true,
   platformFeeCents: true,
+  refundedCents: true,
   currency: true,
   paypalOrderId: true,
   paypalAuthorizationId: true,

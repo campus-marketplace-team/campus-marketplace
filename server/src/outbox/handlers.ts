@@ -30,6 +30,22 @@ const STATE_MESSAGES: Partial<Record<OrderState, { buyer: string; seller: string
     buyer: "Your order was cancelled. You haven't been charged.",
     seller: "An order was cancelled. Your listing is back on sale.",
   },
+  REFUNDED: {
+    buyer: "Your report was upheld and the payment hold was cancelled. You haven't been charged.",
+    seller: "The buyer's report was upheld, so they weren't charged and you won't be paid for this order.",
+  },
+  PARTIAL_REFUND: {
+    buyer: "Your report was upheld in part: you were charged less than the full price. See the order page for details.",
+    seller: "The buyer's report was upheld in part: they paid less than the full price, and your payout is reduced to match.",
+  },
+  RELEASED: {
+    buyer: "Your report was reviewed and the sale stands, so your payment was taken.",
+    seller: "The buyer's report was reviewed and the sale stands. Your payout is on the way.",
+  },
+  ESCALATED: {
+    buyer: "Your report was passed to a person for review. Your payment stays on hold, and you haven't been charged.",
+    seller: "The buyer's report was passed to a person for review. The payment stays on hold until then.",
+  },
 };
 
 /** Notification kind for an order reaching `state`, e.g. ORDER_VOIDED (the same kind the deadline job writes). */

@@ -96,3 +96,60 @@
   color: var(--color-danger);
   font-weight: 700;
 }
+
+/* Dispute approval gate */
+.dispute-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.dispute-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.dispute-card p {
+  margin: 0;
+}
+
+.dispute-card__order,
+.dispute-card__meta {
+  font-size: 0.875rem;
+}
+
+.dispute-card__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dispute-card__evidence {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.dispute-card__buttons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.dispute-card__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.dispute-card__reasoning {
+  display: grid;
+  flex: 1 1 280px;
+  gap: var(--space-1);
+}

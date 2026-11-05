@@ -102,8 +102,8 @@ describe("every illegal transition is rejected", () => {
     ORDER_STATES.filter((to) => !isLegalTransition(from, to)).map((to) => [from, to] as const),
   );
 
-  it("covers all state pairs outside the 13 legal moves", () => {
-    expect(illegal).toHaveLength(ORDER_STATES.length ** 2 - 13);
+  it("covers all state pairs outside the 18 legal moves", () => {
+    expect(illegal).toHaveLength(ORDER_STATES.length ** 2 - 18);
   });
 
   it.each(illegal)("%s → %s throws IllegalTransitionError before any query", async (from, to) => {

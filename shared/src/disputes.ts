@@ -16,3 +16,15 @@ export const DISPUTE_LIMITS = {
   descriptionMax: 2000,
   photosMax: 6,
 } as const;
+
+/**
+ * The dispute agent decides on its own only for orders up to this amount; above
+ * it, refunds and releases wait for an admin. It's the order's amount, not the
+ * refund's, because a small partial refund still sends the rest to the seller.
+ */
+export const DISPUTE_APPROVAL_LIMIT_CENTS = 2500;
+
+/** What can decide a dispute. Values are the Prisma DecisionOutcome names. */
+export const DISPUTE_ACTIONS = ["REFUND", "PARTIAL_REFUND", "RELEASE", "ESCALATE"] as const;
+
+export type DisputeAction = (typeof DISPUTE_ACTIONS)[number];
