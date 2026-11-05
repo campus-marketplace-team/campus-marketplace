@@ -35,7 +35,7 @@ export function createAdminRouter(getPayPal: () => PayPalClient) {
     await respond(res, () => run(paypal));
   }
 
-  // GET /api/admin/dashboard  ->  orders by state, ledger money totals, orders, reconciliation flags, dead letters, dispute decisions waiting
+  // GET /api/admin/dashboard  ->  orders by state, ledger money totals, orders, reconciliation flags, dead letters, dispute decisions waiting, AI decision records
   router.get("/dashboard", async (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json(await getAdminDashboard());

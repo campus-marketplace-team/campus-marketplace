@@ -5,8 +5,6 @@ import {
   type GridApi,
   ModuleRegistry,
   type RowClickedEvent,
-  themeQuartz,
-  type ValueFormatterParams,
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
 import type { OrderState } from '@campus/shared'
@@ -23,37 +21,21 @@ import { Alert, Button } from '../../components'
 import { Page } from '../../layout/Page'
 import { formatPrice } from '../../listings/format'
 import { ORDER_STATE_LABELS } from '../../orders/orderStatus'
+import { dateTime, defaultColDef, gridTheme, money, shortId, stateLabel } from './adminGrid'
+import { AiDecisions } from './AiDecisions'
 import { DisputeQueues } from './DisputeQueues'
 import './admin.css'
 
 // Admin dashboard: orders by state, money held / captured / paid out from the
-// ledger, reconciliation mismatches and dead-lettered outbox rows, all read-only,
-// plus the dispute approval gate (DisputeQueues.tsx).
+// ledger, reconciliation mismatches and dead-lettered outbox rows, and the AI
+// decision records (AiDecisions.tsx), all read-only, plus the dispute approval
+// gate (DisputeQueues.tsx).
 // Refreshes every 30 s. All cells render as plain text (no HTML), since
 // messages and payloads can contain anything.
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const REFRESH_MS = 30_000
-
-/** AG Grid's Quartz theme in the app's colours (index.css tokens). */
-const gridTheme = themeQuartz.withParams({
-  accentColor: '#4f46e5',
-  foregroundColor: '#1f2140',
-  borderColor: '#e1e4f2',
-  headerBackgroundColor: '#eef0fa',
-  backgroundColor: '#ffffff',
-  fontFamily: 'inherit',
-  browserColorScheme: 'light',
-  wrapperBorderRadius: 12,
-})
-
-const money = (p: ValueFormatterParams) => (typeof p.value === 'number' ? formatPrice(p.value) : '')
-const dateTime = (p: ValueFormatterParams) => (p.value ? new Date(p.value as string).toLocaleString() : '')
-const stateLabel = (p: ValueFormatterParams) => (p.value ? `${ORDER_STATE_LABELS[p.value as OrderState]} (${p.value})` : '')
-const shortId = (p: ValueFormatterParams) => (typeof p.value === 'string' ? p.value.slice(0, 8) : '')
-
-const defaultColDef: ColDef = { sortable: true, filter: true, resizable: true }
 
 type LoadState =
   | { status: 'loading' }
@@ -157,6 +139,13 @@ function Dashboard({
           <OrdersGrid rows={orders} />
         </section>
       </div>
+
+      <AiDecisions
+        risk={data.riskDecisions}
+        riskCounts={data.riskDecisionCounts}
+        disputes={data.disputeDecisions}
+        disputeCounts={data.disputeDecisionCounts}
+      />
 
       <section aria-labelledby="flags-heading">
         <h2 id="flags-heading" className="admin__heading">

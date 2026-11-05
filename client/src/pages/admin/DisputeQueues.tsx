@@ -12,17 +12,11 @@ import {
 } from '../../admin/adminApi'
 import { Alert, Button } from '../../components'
 import { formatPrice } from '../../listings/format'
+import { ACTION_LABELS } from './adminGrid'
 
 // The dispute approval gate: decisions the agent proposed above the limit, and
 // escalated disputes an admin decides directly. Reasoning, evidence and reports
 // can quote what a buyer or seller wrote, so they only ever render as plain text.
-
-const ACTION_LABELS: Record<DisputeAction, string> = {
-  REFUND: 'Full refund',
-  PARTIAL_REFUND: 'Partial refund',
-  RELEASE: 'Release to seller',
-  ESCALATE: 'Escalate',
-}
 
 /** What an admin needs to know about what a decision will do to the money. */
 function moneyEffect(action: DisputeAction, refundCents: number | null, order: DisputeOrder) {

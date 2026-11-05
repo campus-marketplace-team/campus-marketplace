@@ -89,9 +89,70 @@ export type DisputeDecisionResult = {
   paypalTransactionId: string | null
 }
 
+/** Order fields on a decision record. Null only if a decision has no order. */
+type DecisionOrderFields = {
+  orderId: string | null
+  orderState: OrderState | null
+  orderAmountCents: number | null
+  listingTitle: string | null
+  buyer: string | null
+  seller: string | null
+}
+
+/** Our own numbers and phrase ids, never listing or chat text (server/src/risk/features.ts). */
+export type RiskFeatures = {
+  sellerAccountAgeDays: number
+  sellerListingsLast24h: number
+  price: { amountCents: number; categoryMedianCents: number | null; ratioToMedian: number | null; comparableListings: number }
+  sellerPastDisputes: number
+  buyerPastDisputes: number
+  offPlatformPhrases: { phrase: string; sender: 'buyer' | 'seller' }[]
+}
+
+/** What the risk engine decided before a checkout. `reasons` is model output and can quote untrusted text. */
+export type RiskDecisionRecord = DecisionOrderFields & {
+  id: string
+  risk: 'low' | 'medium' | 'high' | null
+  outcome: 'NORMAL' | 'HOLD_WITH_WARNING' | 'BLOCKED'
+  reasons: string[]
+  signals: string[]
+  floor: string | null
+  hardRules: string[]
+  reasoning: string | null
+  model: string | null
+  classifierRisk: string | null
+  classifierFallbackReason: string | null
+  features: RiskFeatures | null
+  createdAt: string
+}
+
+/** A dispute decision in any state. Reasoning and evidence can quote untrusted text. */
+export type DisputeDecisionRecord = DecisionOrderFields & {
+  id: string
+  outcome: DisputeAction
+  actionStatus: DisputeDecisionResult['actionStatus'] | null
+  actionError: string | null
+  amountCents: number | null
+  reasoning: string | null
+  evidence: { source: string; detail: string }[]
+  model: string | null
+  proposedByAgent: boolean
+  paypalTransactionId: string | null
+  approver: string | null
+  approvedAt: string | null
+  rejectedAt: string | null
+  executedAt: string | null
+  reviewNote: string | null
+  createdAt: string
+}
+
 export type AdminDashboard = {
   pendingDisputeDecisions: PendingDisputeDecision[]
   escalatedDisputes: EscalatedDispute[]
+  riskDecisions: RiskDecisionRecord[]
+  riskDecisionCounts: { total: number; normal: number; holdWithWarning: number; blocked: number }
+  disputeDecisions: DisputeDecisionRecord[]
+  disputeDecisionCounts: { total: number; failed: number }
   generatedAt: string
   money: MoneyTotals
   ordersByState: { state: OrderState; count: number }[]
