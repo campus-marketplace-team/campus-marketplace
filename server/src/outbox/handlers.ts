@@ -18,6 +18,10 @@ const STATE_MESSAGES: Partial<Record<OrderState, { buyer: string; seller: string
     buyer: "Your payment is on hold, not charged yet. Meet the seller before the deadline on the order page and scan their handoff code.",
     seller: "Your item has a buyer. Meet before the deadline on the order page and show them the handoff code there.",
   },
+  IN_DISPUTE: {
+    buyer: "Your report was received. Your payment stays on hold, and you haven't been charged, while it's looked into.",
+    seller: "The buyer reported a problem with an order. The payment stays on hold while it's looked into. See the order page for details.",
+  },
   CAPTURED: {
     buyer: "Handoff confirmed. Your payment is complete.",
     seller: "Handoff confirmed. The buyer's payment was taken and your payout is on the way.",

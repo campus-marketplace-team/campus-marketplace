@@ -1,19 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router'
-import { isTerminalState } from '@campus/shared'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { Link, useLocation, useParams } from 'react-router'
+import { DISPUTE_LIMITS, isTerminalState, LISTING_LIMITS } from '@campus/shared'
 import { ApiError } from '../../api/client'
-import { Alert, ButtonLink, Card } from '../../components'
+import { Alert, Button, ButtonLink, Card } from '../../components'
 import { usePoll } from '../../chat/usePoll'
 import { Page } from '../../layout/Page'
 import { formatPrice } from '../../listings/format'
-import { describeState, formatTimeLeft, ORDER_STATE_LABELS, RISK_WARNING, stateTone } from '../../orders/orderStatus'
-import { fetchOrder, type OrderStatus } from '../../orders/ordersApi'
+import {
+  describeState,
+  disputePhotoProblem,
+  disputeReasonLabel,
+  formatTimeLeft,
+  ORDER_STATE_LABELS,
+  RISK_WARNING,
+  stateTone,
+} from '../../orders/orderStatus'
+import { fetchOrder, uploadDisputePhoto, type OrderDispute, type OrderStatus } from '../../orders/ordersApi'
+import type { OrderStatusNotice } from './ReportProblemPage'
 import './orders.css'
 
 // Order status for the buyer and the seller: where the order stands, the
-// handoff deadline countdown while the payment is held, and the next step
-// (seller shows the QR code, buyer scans it). Polls so each side sees the
-// other's scan without reloading.
+// handoff deadline countdown while the payment is held, the next step (seller
+// shows the QR code, buyer scans it or reports a problem), and any report made.
+// Polls so each side sees the other's scan or report without reloading.
 
 const POLL_MS = 10_000
 
@@ -66,16 +75,36 @@ function OrderLoader({ orderId }: { orderId: string }) {
       </div>
     )
   }
-  return <OrderDetails order={state.order} />
+  return (
+    <OrderDetails
+      order={state.order}
+      onDisputeChange={(dispute) =>
+        setState((prev) => (prev.status === 'ready' ? { status: 'ready', order: { ...prev.order, dispute } } : prev))
+      }
+    />
+  )
 }
 
-function OrderDetails({ order }: { order: OrderStatus }) {
+function OrderDetails({ order, onDisputeChange }: { order: OrderStatus; onDisputeChange: (dispute: OrderDispute) => void }) {
   const isSeller = order.role === 'seller'
   const other = isSeller ? order.buyer : order.seller
   const photo = order.listing.photoUrls[0]
+  const notice = useLocation().state as OrderStatusNotice | null
 
   return (
     <div className="stack">
+      {notice?.reported && <Alert tone="success">Your report was sent. Your payment stays on hold while it's looked into.</Alert>}
+      {notice?.photoErrors?.length ? (
+        <Alert tone="error">
+          {notice.photoErrors.length === 1 ? 'One photo' : `${notice.photoErrors.length} photos`} didn't upload. You can try
+          again below:
+          <ul className="order-report__errors">
+            {notice.photoErrors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
       {order.riskWarning && order.state === 'AUTHORIZED' && <Alert tone="error">{RISK_WARNING}</Alert>}
       <Card>
         <div className="order-status">
@@ -97,7 +126,11 @@ function OrderDetails({ order }: { order: OrderStatus }) {
           )}
         </div>
       </Card>
-      {isSeller && (
+      {order.dispute && (
+        <DisputeDetails orderId={order.id} dispute={order.dispute} isSeller={isSeller} onChange={onDisputeChange} />
+      )}
+      {/* While disputed, the seller may not get this at all. */}
+      {isSeller && order.state !== 'IN_DISPUTE' && (
         <Card title="Your payout">
           <dl className="order-money">
             <dt>Sale price</dt>
@@ -114,6 +147,82 @@ function OrderDetails({ order }: { order: OrderStatus }) {
         on the listing page.
       </p>
     </div>
+  )
+}
+
+/** The report on this order. The buyer can add photos until it starts being decided. */
+function DisputeDetails({
+  orderId,
+  dispute,
+  isSeller,
+  onChange,
+}: {
+  orderId: string
+  dispute: OrderDispute
+  isSeller: boolean
+  onChange: (dispute: OrderDispute) => void
+}) {
+  const [progress, setProgress] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const room = DISPUTE_LIMITS.photosMax - dispute.photoUrls.length
+  const canAddPhotos = !isSeller && dispute.status === 'OPEN' && room > 0
+  const reportedOn = new Date(dispute.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+  async function addPhotos(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = '' // so picking the same file again still fires onChange
+    const problems: string[] = files.slice(room).length ? [`You can add ${room} more.`] : []
+    const picked = files.slice(0, room)
+    for (const [i, file] of picked.entries()) {
+      const problem = disputePhotoProblem(file)
+      if (problem) {
+        problems.push(problem)
+        continue
+      }
+      setProgress(`Uploading photo ${i + 1} of ${picked.length}…`)
+      try {
+        onChange((await uploadDisputePhoto(orderId, file)).dispute)
+      } catch (err) {
+        problems.push(`${file.name}: ${err instanceof ApiError ? err.message : 'upload failed'}`)
+      }
+    }
+    setProgress(null)
+    setError(problems.length ? problems.join(' ') : null)
+  }
+
+  return (
+    <Card title={isSeller ? 'What the buyer reported' : 'Your report'}>
+      <div className="order-report">
+        <p className="order-report__reason">{disputeReasonLabel(dispute.reason)}</p>
+        <p className="text-muted order-report__date">Reported {reportedOn}</p>
+        {dispute.description && <p className="order-report__text">{dispute.description}</p>}
+        {dispute.photoUrls.length > 0 && (
+          <ul className="order-report__photos">
+            {dispute.photoUrls.map((url, i) => (
+              <li key={url}>
+                <a href={url} target="_blank" rel="noreferrer">
+                  <img src={url} alt={`Photo ${i + 1} of ${dispute.photoUrls.length} from the report`} />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {canAddPhotos && (
+          <div>
+            <input ref={fileInput} type="file" accept={LISTING_LIMITS.photoTypes.join(',')} multiple hidden onChange={addPhotos} />
+            <Button variant="secondary" size="sm" loading={progress !== null} onClick={() => fileInput.current?.click()}>
+              {progress ?? 'Add photos'}
+            </Button>
+          </div>
+        )}
+        {error && (
+          <p className="field__error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -160,6 +269,11 @@ function HandoffAction({ orderId, isSeller, deadline }: { orderId: string; isSel
           ? 'Hand over the item only after the buyer’s scan says the payment went through.'
           : 'Scan only once you have the item and are happy with it. Scanning releases your payment.'}
       </p>
+      {!isSeller && (
+        <ButtonLink to={`/orders/${orderId}/report`} variant="secondary" fullWidth>
+          Report a problem
+        </ButtonLink>
+      )}
     </div>
   )
 }

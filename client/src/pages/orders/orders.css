@@ -112,6 +112,66 @@
   font-size: 0.85rem;
 }
 
+.order-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.order-report__reason,
+.order-report__date,
+.order-report__text,
+.order-report__cancel {
+  margin: 0;
+}
+
+.order-report__reason {
+  font-weight: 600;
+}
+
+.order-report__date {
+  font-size: 0.85rem;
+}
+
+/* Written by a user: keep their line breaks, and don't let long words overflow. */
+.order-report__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.order-report__cancel {
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.order-report__errors {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.order-report__photos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.order-report__photos a {
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-sm);
+}
+
+.order-report__photos img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .order-money {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -150,7 +150,7 @@ Goal: every order gets a risk decision before payment, and complaints are resolv
 - [ ] **4.4 Risk evals**
   > Read CLAUDE.md. Create an eval set of 40 labeled listings and chats (scam and legit, including prompt-injection attempts) and a script that runs the full risk pipeline and prints precision and recall. When done, tick task 4.4 in TASKS.md.
 
-- [ ] **4.5 Report a problem flow**
+- [x] **4.5 Report a problem flow** (server/src/orders/dispute.ts, POST /api/orders/:id/dispute and /dispute/photos, client/src/pages/orders/ReportProblemPage.tsx, shared/src/disputes.ts; no migration or new env vars)
   > Read CLAUDE.md. Build "Report a problem": the buyer opens a dispute on an order, adds text and photos, and the order moves to IN_DISPUTE through the state machine. When done, tick task 4.5 in TASKS.md.
 
 - [ ] **4.6 Dispute agent read tools**

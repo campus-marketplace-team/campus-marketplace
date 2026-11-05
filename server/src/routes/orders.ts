@@ -1,6 +1,8 @@
-import { Router, type Response } from "express";
+import express, { Router, type Response } from "express";
+import { LISTING_LIMITS } from "@campus/shared";
 import { requireAuth } from "../auth/middleware.js";
 import { authorizeCheckout, CheckoutError, startCheckout } from "../orders/checkout.js";
+import { addDisputePhoto, openDispute } from "../orders/dispute.js";
 import { issueHandoffToken, redeemHandoffToken } from "../orders/handoff.js";
 import { getOrderStatus, listMyOrders } from "../orders/orderStatus.js";
 import type { PayPalClient } from "../paypal/client.js";
@@ -11,6 +13,8 @@ import type { Classify } from "../risk/assess.js";
 // createOrder and POST /:id/authorize from onApprove. The QR handoff uses
 // POST /:id/handoff-token (seller) and POST /handoff/scan (buyer). PayPal
 // itself is only ever called from the server.
+
+const rawImage = express.raw({ type: [...LISTING_LIMITS.photoTypes], limit: LISTING_LIMITS.photoMaxBytes });
 
 /** `getPayPal` is resolved per request so the API starts without PayPal configured. */
 export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Classify) {
@@ -62,6 +66,16 @@ export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Clas
   // Returns { token, expiresAt }.
   router.post("/:id/handoff-token", (req, res) =>
     respond(res, () => issueHandoffToken(req.user!.id, req.params.id), 201),
+  );
+
+  // POST /api/orders/:id/dispute  { reason, description }  (the order's buyer) — reports a
+  // problem: AUTHORIZED → IN_DISPUTE. Returns { order, dispute }.
+  router.post("/:id/dispute", (req, res) => respond(res, () => openDispute(req.user!.id, req.params.id, req.body), 201));
+
+  // POST /api/orders/:id/dispute/photos  (the order's buyer) — adds one photo to the open
+  // dispute. Body: the raw image bytes, as for listing photos. Returns { dispute }.
+  router.post("/:id/dispute/photos", rawImage, (req, res) =>
+    respond(res, () => addDisputePhoto(req.user!.id, req.params.id, req.body), 201),
   );
 
   // POST /api/orders/handoff/scan  { token }  (the order's buyer) — redeems the QR token and

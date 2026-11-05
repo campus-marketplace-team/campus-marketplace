@@ -5,7 +5,7 @@ import type { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../db.js";
 import { requireAuth } from "../auth/middleware.js";
 import { isUuid } from "../ids.js";
-import { deleteObject, getStorageConfig, pathFromPublicUrl, uploadObject } from "../storage.js";
+import { deleteObject, getStorageConfig, pathFromPublicUrl, sniffImage, uploadObject } from "../storage.js";
 
 export const listingsRouter = Router();
 
@@ -247,20 +247,6 @@ listingsRouter.post("/:id/sold", requireAuth, async (req, res) => {
   }
   res.json({ listing: updated });
 });
-
-// Identifies the image type from its first bytes. The Content-Type header is
-// only a hint: the stored type comes from the bytes, so nothing but real
-// JPEG/PNG/WebP files ends up in the public bucket.
-function sniffImage(buf: Buffer): { type: string; ext: string } | null {
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { type: "image/jpeg", ext: "jpg" };
-  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return { type: "image/png", ext: "png" };
-  }
-  if (buf.length >= 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP") {
-    return { type: "image/webp", ext: "webp" };
-  }
-  return null;
-}
 
 const rawImage = express.raw({ type: [...LISTING_LIMITS.photoTypes], limit: LISTING_LIMITS.photoMaxBytes });
 

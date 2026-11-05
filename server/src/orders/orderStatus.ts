@@ -2,6 +2,7 @@ import { prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import { latestRiskOutcome } from "../risk/assess.js";
 import { CheckoutError, orderView } from "./checkout.js";
+import { getDisputeView } from "./dispute.js";
 
 // Read-only order views for the order status page and the "My orders" list.
 // Only the order's buyer and seller can see it; anyone else gets a 404.
@@ -39,7 +40,7 @@ export async function getOrderStatus(userId: string, orderId: unknown) {
   const view = toView(order, userId);
   // Only the buyer is warned. The seller just sees the later deadline.
   const riskWarning = view.role === "buyer" && (await latestRiskOutcome(prisma, order.id)) === "HOLD_WITH_WARNING";
-  return { ...view, riskWarning };
+  return { ...view, riskWarning, dispute: await getDisputeView(order.id) };
 }
 
 const LIST_LIMIT = 100;

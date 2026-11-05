@@ -117,6 +117,7 @@ export async function cleanup() {
       prisma.outboxEvent.deleteMany({ where: { order: orders } }),
       // So would decisions (order_id and listing_id ON DELETE SET NULL).
       prisma.decision.deleteMany({ where: { OR: [{ order: orders }, { listing: listings }] } }),
+      prisma.dispute.deleteMany({ where: { OR: [{ openedById: { in: ids } }, { order: orders }] } }),
       prisma.order.deleteMany({ where: orders }),
       prisma.listing.deleteMany({ where: listings }),
       prisma.user.deleteMany({ where: { id: { in: ids } } }),

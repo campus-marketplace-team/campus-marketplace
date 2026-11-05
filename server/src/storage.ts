@@ -1,4 +1,4 @@
-// Supabase Storage for listing photos, via its REST API (server only).
+// Supabase Storage for listing and dispute photos, via its REST API (server only).
 //
 // The bucket is public-read, so photo URLs work in <img> tags without auth.
 // Only this server can write to it: uploads use the secret (service role) key,
@@ -18,6 +18,20 @@ export function getStorageConfig(): StorageConfig | null {
   if (!url || !key) return null;
   const bucket = (process.env.SUPABASE_STORAGE_BUCKET ?? "").trim() || "listing-photos";
   return { url, key, bucket };
+}
+
+// Identifies the image type from its first bytes. The Content-Type header is
+// only a hint: the stored type comes from the bytes, so nothing but real
+// JPEG/PNG/WebP files ends up in the public bucket.
+export function sniffImage(buf: Buffer): { type: string; ext: string } | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { type: "image/jpeg", ext: "jpg" };
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return { type: "image/png", ext: "png" };
+  }
+  if (buf.length >= 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP") {
+    return { type: "image/webp", ext: "webp" };
+  }
+  return null;
 }
 
 function headers(config: StorageConfig, extra: Record<string, string> = {}) {

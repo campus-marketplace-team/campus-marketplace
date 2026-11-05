@@ -1,4 +1,4 @@
-import type { OrderState } from '@campus/shared'
+import { isDisputeReason, LISTING_LIMITS, type DisputeReason, type OrderState } from '@campus/shared'
 
 // What each order state means to people, for the status page and "My orders".
 
@@ -16,6 +16,27 @@ export const ORDER_STATE_LABELS: Record<OrderState, string> = {
   PAYOUT_PENDING: 'Payout on the way',
   PAID_OUT: 'Complete',
   PAYOUT_RETRY: 'Payout delayed',
+}
+
+export const DISPUTE_REASON_LABELS: Record<DisputeReason, string> = {
+  NOT_AS_DESCRIBED: 'Item isn’t as described',
+  DAMAGED: 'Item is damaged or doesn’t work',
+  WRONG_ITEM: 'Wrong item',
+  SELLER_NO_SHOW: 'Seller didn’t show up',
+  OTHER: 'Something else',
+}
+
+/** A stored reason for people to read. Disputes opened in PayPal carry PayPal's own reasons. */
+export function disputeReasonLabel(reason: string): string {
+  return isDisputeReason(reason) ? DISPUTE_REASON_LABELS[reason] : 'Reported through PayPal'
+}
+
+/** Why a file picked for a report can't be uploaded, or null if it's fine. */
+export function disputePhotoProblem(file: File): string | null {
+  if (!(LISTING_LIMITS.photoTypes as readonly string[]).includes(file.type)) return `${file.name} isn't a JPEG, PNG or WebP image.`
+  const maxBytes = LISTING_LIMITS.photoMaxBytes
+  if (file.size > maxBytes) return `${file.name} is over ${maxBytes / (1024 * 1024)} MB.`
+  return null
 }
 
 /** Shown to the buyer of an order the risk check flagged. Fixed text: the check's reasons are internal. */
