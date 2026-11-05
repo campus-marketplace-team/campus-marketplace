@@ -22,6 +22,7 @@
     "webhooks:replay": "tsx scripts/webhooks-replay.ts",
     "admin:grant": "tsx scripts/grant-admin.ts",
     "risk:classify": "tsx scripts/risk-classify.ts",
+    "risk:eval": "tsx scripts/risk-eval.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "keywords": [],
