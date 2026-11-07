@@ -1,6 +1,7 @@
 import { HONOR_PERIOD_MS } from "@campus/shared";
 import { prisma } from "../db.js";
 import { type PayPalClient, PayPalError } from "../paypal/client.js";
+import { orderScope } from "../testUsers.js";
 import { type OverdueOrder, voidAndRecord, voidOverdueOrder } from "./handoffDeadline.js";
 
 // Reauthorize-or-void (see CLAUDE.md "PayPal limits"). A PayPal authorization
@@ -202,13 +203,14 @@ export async function handleExpiringAuthorization(paypal: PayPalClient, orderId:
   }
 }
 
-/** Finds authorizations past their honor period or near their 29-day expiry and handles them, oldest first. */
+/** Finds authorizations past their honor period or near their 29-day expiry and handles them, oldest first. `skipTestUsers`: see src/testUsers.ts. */
 export async function sweepExpiringAuthorizations(
   paypal: PayPalClient,
-  { now = new Date(), limit = EXPIRY_BATCH_SIZE }: { now?: Date; limit?: number } = {},
+  { now = new Date(), limit = EXPIRY_BATCH_SIZE, skipTestUsers = false }: { now?: Date; limit?: number; skipTestUsers?: boolean } = {},
 ): Promise<ExpirySweepResult> {
   const due = await prisma.order.findMany({
     where: {
+      ...orderScope(skipTestUsers),
       paypalAuthorizationId: { not: null },
       OR: [
         {

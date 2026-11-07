@@ -11,6 +11,7 @@ import { StaleOrderError, transition } from "../orders/stateMachine.js";
 import { enqueueDisputeDecision } from "../outbox/handlers.js";
 import { type PayPalClient, PayPalError } from "../paypal/client.js";
 import { encodeForPrompt } from "../risk/classifier.js";
+import { NOT_TEST_USER_ORDER } from "../testUsers.js";
 import { DisputeNotFoundError, type DisputeToolResult, getDisputedOrder, getDisputeLedgerEntries, getDisputeQrScanLog } from "./readTools.js";
 
 // The dispute agent's action tools (see CLAUDE.md "AI"). The model only proposes:
@@ -462,9 +463,17 @@ export async function executeDisputeDecision(paypal: PayPalClient, decisionId: s
 export type DisputeRetrySweepResult = { checked: number; executed: number; failed: number; waiting: number };
 
 /** Re-sends approved decisions that haven't finished, e.g. after a PayPal timeout or a crash. */
-export async function sweepApprovedDisputeDecisions(paypal: PayPalClient, { now = new Date(), limit = DISPUTE_RETRY_BATCH_SIZE }: { now?: Date; limit?: number } = {}): Promise<DisputeRetrySweepResult> {
+export async function sweepApprovedDisputeDecisions(
+  paypal: PayPalClient,
+  { now = new Date(), limit = DISPUTE_RETRY_BATCH_SIZE, skipTestUsers = false }: { now?: Date; limit?: number; skipTestUsers?: boolean } = {},
+): Promise<DisputeRetrySweepResult> {
   const due = await prisma.decision.findMany({
-    where: { kind: "DISPUTE", actionStatus: "APPROVED", approvedAt: { lte: new Date(now.getTime() - DISPUTE_RETRY_AFTER_MS) } },
+    where: {
+      kind: "DISPUTE",
+      actionStatus: "APPROVED",
+      approvedAt: { lte: new Date(now.getTime() - DISPUTE_RETRY_AFTER_MS) },
+      ...(skipTestUsers ? { order: { is: NOT_TEST_USER_ORDER } } : {}), // see src/testUsers.ts
+    },
     orderBy: { approvedAt: "asc" },
     take: limit,
     select: { id: true },

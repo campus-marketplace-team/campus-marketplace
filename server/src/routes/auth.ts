@@ -6,6 +6,7 @@ import { isSchoolEmail, normalizeEmail, sendVerificationEmail } from "../auth/em
 import { requireAuth } from "../auth/middleware.js";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "../auth/password.js";
 import { signSessionToken, signVerifyEmailToken, verifyVerifyEmailToken } from "../auth/tokens.js";
+import { TEST_USER_EMAIL_PREFIX } from "../testUsers.js";
 
 export const authRouter = Router();
 
@@ -33,6 +34,11 @@ authRouter.post("/signup", async (req, res) => {
   if (!isSchoolEmail(email)) {
     const domains = getAuthConfig().allowedEmailDomains.join(", ");
     res.status(400).json({ error: `Sign up with your school email (${domains})` });
+    return;
+  }
+  // Reserved for npm test's users, whose data the worker skips (src/testUsers.ts). Tests create them directly in the DB.
+  if (email.startsWith(TEST_USER_EMAIL_PREFIX)) {
+    res.status(400).json({ error: "This email address can't be used to sign up" });
     return;
   }
   if (typeof password !== "string" || password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {

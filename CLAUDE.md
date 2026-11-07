@@ -7,7 +7,7 @@ Team: Hassan and Abubakr. Tasks aren't assigned to either person; whoever picks 
 ## Stack
 - Web: React (Vite) + TypeScript, AG Grid for the admin dashboard
 - API: Express + TypeScript
-- Worker: pg-boss (job queue inside Postgres, no Redis)
+- Worker: pg-boss (job queue inside Postgres, no Redis). `startWorker()` in `server/src/worker/startWorker.ts` runs inside the API on Render (`RUN_WORKER=true`); `worker/` can run it as its own process. It always skips test users' rows (`server/src/testUsers.ts`)
 - DB: Postgres on Supabase with Prisma — `server/prisma/schema.prisma` is the source of truth
 - Hosting: web on Vercel, API on Render (free plan); both auto-deploy from `main`. URLs and rules under **Deployed app** below; setup in `DEPLOY.md`
 - Monorepo (npm workspaces): `client/` (web), `server/` (API), `worker/`, `shared/` (types shared by all three, imported as `@campus/shared`)
@@ -111,10 +111,11 @@ A phase is done only when its "Done when" check passes on the **deployed** app. 
 
 ## Deployed app
 - Web: https://campus-marketplace-five-delta.vercel.app (Vercel)
-- API: https://campus-marketplace-api-ia11.onrender.com (Render). Health check: `GET /api/health` → `{"ok":true}`
+- API: https://campus-marketplace-api-ia11.onrender.com (Render). Health check: `GET /api/health` → `{"ok":true,"worker":{"enabled":true,"lastTickAt":"..."}}`
 - If either URL changes, update it here, in `DEPLOY.md`, and in Render's `CORS_ORIGINS`.
-- Every push to `main` redeploys both. Only merge code that builds and passes `npm test`.
-- Production uses the **same Supabase database** as local dev, and deploys don't run migrations. Apply a new migration with `npm run migrate:deploy -w server` before merging it.
+- Every push to `main` redeploys both. Only push code that builds and passes `npm test`.
+- Production uses the **same Supabase database** as local dev, and deploys don't run migrations. Apply a new migration with `npm run migrate:deploy -w server` before pushing it.
+- The deployed API runs the worker. Never run a second worker (`worker/` or `RUN_WORKER=true` locally) against the shared database while it's on.
 - The Vercel and Render dashboards (env vars, logs) are on Abubakr's account; Claude Code can't see them. For a new env var, add the name to `.env.example` and tell the developer, who adds it on Render (API) or Vercel (`VITE_*` only, then a redeploy, since they're baked in at build time).
 - Render's free plan sleeps after ~15 min idle; the first request after that can take ~1 min.
 - No email provider yet: sign-up verification links appear only in the Render logs. Test with seed accounts instead, e.g. `seed.alex.chen@mcmaster.ca` / `password123` (sandbox test data, not a secret).
@@ -129,7 +130,9 @@ A phase is done only when its "Done when" check passes on the **deployed** app. 
 
 ## Working rules for Claude Code
 - **Never run `git commit`, `git push`, or create PRs.** The developer commits themselves. When a task is done, stop and summarize what changed so they can review and commit.
-- Work on feature branches; `main` always deploys. PRs reviewed by the other teammate.
+- We work directly on `main`: no feature branches, no PRs. `main` always deploys, so it must build and pass `npm test`.
+- Commit messages are one lowercase line starting with a verb (e.g. "add worker health check"), with no prefixes or brackets.
+- Scratch scripts run with `npx tsx` use the `.mts` extension.
 - Secrets live in `.env` files only (gitignored). Never hardcode or commit keys, passwords, or tokens.
 - Write tests for state transitions, concurrency, and ledger sums when touching that code.
 - Keep changes scoped to the task asked; don't refactor unrelated areas.

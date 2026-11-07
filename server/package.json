@@ -11,7 +11,8 @@
   },
   "scripts": {
     "pretest": "prisma generate",
-    "test": "vitest run --maxWorkers=3",
+    "test": "vitest run --maxWorkers=2",
+    "test:smoke": "vitest run --config vitest.smoke.config.ts",
     "predev": "prisma generate",
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
@@ -39,6 +40,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "8.7.3",
     "jose": "^6.2.12",
+    "pg-boss": "^12.38.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

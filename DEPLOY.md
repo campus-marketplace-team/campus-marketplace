@@ -7,7 +7,7 @@
 | Web app | https://campus-marketplace-five-delta.vercel.app |
 | API | https://campus-marketplace-api-ia11.onrender.com (health: `/api/health`) |
 
-- Every push to `main` redeploys both, so only merge code that builds and passes tests.
+- Every push to `main` redeploys both, so only push code that builds and passes tests.
 - The Vercel and Render projects are on Abubakr's account. Ask him to add or change env vars, read the logs, or fetch a sign-up verification link.
 - If a URL changes (e.g. a renamed Vercel domain), update this file, `CLAUDE.md`, `CORS_ORIGINS` on Render, and `VITE_API_URL` on Vercel.
 
@@ -18,7 +18,7 @@
 | API | `server/` | Render (free plan) |
 | Web app | `client/` | Vercel |
 | Database | — | Supabase (already set up) |
-| Worker | `worker/` | Not deployed yet; hosting to be decided in Phase 3 |
+| Worker | `server/src/worker/` | Runs **inside the API** on Render (`RUN_WORKER=true`); see [Worker](#worker-inside-the-api). `worker/` can still run it as its own process |
 
 Deploy in this order, because each step needs a URL from the one before:
 1. API, to get its URL (e.g. `https://campus-marketplace-api.onrender.com`).
@@ -48,6 +48,8 @@ The build installs all workspaces (which also builds `shared/`), then runs `pris
 | Variable | Value | Secret? |
 |---|---|---|
 | `DATABASE_URL` | Supabase **Session pooler** connection string (port 5432) | Yes |
+| `DATABASE_POOL_MAX` | `4`. Prisma's pool, shared by requests and the worker; with pg-boss's 2 that's 6 connections. The worker refuses to start if it's unset or above 4 | No |
+| `RUN_WORKER` | `true`: runs the background worker inside the API (see [Worker](#worker-inside-the-api)) | No |
 | `PAYPAL_CLIENT_ID` | Sandbox app client ID | Yes |
 | `PAYPAL_CLIENT_SECRET` | Sandbox app secret | Yes |
 | `PAYPAL_BASE_URL` | `https://api-m.sandbox.paypal.com` | No |
@@ -59,8 +61,8 @@ The build installs all workspaces (which also builds `shared/`), then runs `pris
 | `SUPABASE_URL` | Supabase project URL, e.g. `https://abcd.supabase.co` (Project Settings → API) | No |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase secret / service_role key. Server only; it bypasses all access rules | Yes |
 | `SUPABASE_STORAGE_BUCKET` | `listing-photos` (optional; that's the default) | No |
-| `ANTHROPIC_API_KEY` | Claude API key for the LLM risk classifier. Without it every order is classified as medium risk | Yes |
-| `CLAUDE_BUDGET_CALLS_PER_DAY` | Optional. Lowers the Claude calls allowed per UTC day; can't go above the built-in 300 | No |
+| `ANTHROPIC_API_KEY` | Claude API key for the LLM risk classifier and the dispute agent. Without it every order is classified as medium risk and every dispute goes straight to an admin | Yes |
+| `CLAUDE_BUDGET_CALLS_PER_DAY` | Optional; suggested `100`. Lowers the Claude calls allowed per UTC day; can't go above the built-in 300 | No |
 | `CLAUDE_BUDGET_CALLS_PER_USER_PER_DAY` | Optional. Lowers the Claude calls allowed per user per UTC day; can't go above the built-in 20 | No |
 | `NODE_VERSION` | `24` | No |
 
@@ -74,7 +76,29 @@ Don't set `PORT`: Render sets it. Node 24 is pinned in `.nvmrc` and `engines`; `
 
 `DATABASE_URL` must be available during the build too, because `prisma.config.ts` reads it when `prisma generate` runs. Render provides env vars at build time by default.
 
-Render's free plan sleeps after ~15 minutes without requests, and the first request afterwards takes up to ~1 minute. Open `/api/health` a minute before a demo or a test run.
+Render's free plan sleeps after ~15 minutes without requests, and the first request afterwards takes up to ~1 minute. A sleeping API also means a stopped worker, so set up the uptime pinger below. Otherwise open `/api/health` a minute before a demo or a test run.
+
+### Worker (inside the API)
+
+The background worker (handoff deadlines, payouts, reauthorize-or-void, reconciliation, dispute decision retries, and the outbox relays that process webhooks, send notifications and run the dispute agent) runs in the API process when `RUN_WORKER=true`. It starts after the HTTP server is listening; on a redeploy (SIGTERM) it stops first, letting running jobs finish, then the server closes.
+
+Env vars to add or check on Render (names only; values in the table above):
+
+- `RUN_WORKER` = `true`
+- `DATABASE_POOL_MAX` = `4`
+- `ANTHROPIC_API_KEY`
+- `CLAUDE_BUDGET_CALLS_PER_DAY` (suggested `100`)
+- `PAYPAL_WEBHOOK_ID`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Database connections: Supabase's session pooler allows 15 in total, shared by the deployed API, local dev and `npm test`. The API with its worker uses at most 6 (`DATABASE_POOL_MAX=4` for Prisma plus 2 for pg-boss).
+
+Keep it awake with a free uptime pinger, such as [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org). Have it call `GET https://campus-marketplace-api-ia11.onrender.com/api/health` every 10 minutes. Without it the free plan sleeps after ~15 idle minutes, and the jobs stop with it.
+
+Check it's running: `GET /api/health` returns `{"ok":true,"worker":{"enabled":true,"lastTickAt":"<recent time>"}}`, and `npm run test:smoke -w server` checks it ticked within the last 5 minutes. `"enabled":false` with `RUN_WORKER=true` means it failed to start; the logs say why (`Worker failed to start: ...`).
+
+**Nobody should run a local worker (`npm run dev -w worker`, or `RUN_WORKER=true` in a local `server/.env`) while the deployed one is on.** Both would work the same shared database. Test users' rows (emails starting with `apitest.`) are always skipped, so `npm test` is safe to run.
 
 ### Railway instead
 
@@ -112,7 +136,7 @@ Deploys do **not** run migrations. The database is shared by local dev and produ
 npm run migrate:deploy -w server
 ```
 
-Do this before merging a branch that adds a migration, then tell your teammate to pull and run `npx prisma generate`.
+Do this before pushing a commit that adds a migration, then tell your teammate to pull and run `npx prisma generate`.
 
 ---
 
@@ -131,7 +155,7 @@ It's safe to re-run. Don't add Storage policies for the anon role: uploads must 
 ## Check a deploy
 
 ```bash
-curl https://campus-marketplace-api-ia11.onrender.com/api/health     # {"ok":true}
+curl https://campus-marketplace-api-ia11.onrender.com/api/health     # {"ok":true,"worker":{"enabled":true,"lastTickAt":"..."}}
 curl https://campus-marketplace-api-ia11.onrender.com/api/listings   # {"listings":[...]} with the seeded listings
 ```
 

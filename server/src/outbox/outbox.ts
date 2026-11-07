@@ -1,5 +1,7 @@
 import { type Db, prisma } from "../db.js";
-import type { Prisma } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
+import { TEST_USER_EMAIL_PREFIX } from "../testUsers.js";
+import { PAYPAL_WEBHOOK_TOPIC } from "../webhooks/ingest.js";
 
 // Transactional outbox (see CLAUDE.md "Reliability rules").
 //
@@ -67,11 +69,59 @@ export function backoffMs(attempts: number) {
 /** Which topics a relay handles: only these, or all but these. Left out, it handles every topic. */
 export type OutboxTopicFilter = { only?: readonly string[]; except?: readonly string[] };
 
-/** Claims up to `limit` due rows (PENDING, or PROCESSING with an expired lease) for this relay. */
-export async function claimOutboxBatch(now: Date, limit = DRAIN_BATCH_SIZE, { only, except }: OutboxTopicFilter = {}): Promise<OutboxEvent[]> {
-  const leaseUntil = new Date(now.getTime() + LEASE_MS);
+/** Which rows a relay may touch. `skipTestUsers`: leave test users' rows alone (see src/testUsers.ts). */
+export type OutboxScope = { topics?: OutboxTopicFilter; skipTestUsers?: boolean };
+
+/**
+ * SQL conditions on "outbox" rows for a relay's scope. A test user's row is one
+ * whose order has a test buyer or seller, or a paypal.webhook row (no order id
+ * of its own) whose stored event names such an order by one of the ids
+ * findOrderForEvent looks up (src/webhooks/process.ts).
+ */
+function scopeSql({ topics: { only, except } = {}, skipTestUsers = false }: OutboxScope): Prisma.Sql {
   const onlyTopics = only ? [...only] : null;
   const exceptTopics = except ? [...except] : [];
+  const topicSql = Prisma.sql`
+    AND (${onlyTopics}::text[] IS NULL OR "outbox"."topic" = ANY(${onlyTopics}::text[]))
+    AND NOT ("outbox"."topic" = ANY(${exceptTopics}::text[]))`;
+  if (!skipTestUsers) return topicSql;
+  const testEmail = `${TEST_USER_EMAIL_PREFIX}%`;
+  return Prisma.sql`${topicSql}
+    AND NOT EXISTS (
+      SELECT 1 FROM "orders" o
+      JOIN "users" b ON b."id" = o."buyer_id"
+      JOIN "users" s ON s."id" = o."seller_id"
+      WHERE (b."email" LIKE ${testEmail} OR s."email" LIKE ${testEmail})
+        AND (
+          o."id" = "outbox"."order_id"
+          OR ("outbox"."topic" = ${PAYPAL_WEBHOOK_TOPIC} AND EXISTS (
+            SELECT 1 FROM "webhook_events" w, LATERAL (SELECT w."payload" -> 'resource' AS r) res
+            WHERE w."id"::text = "outbox"."payload" ->> 'webhookEventId'
+              AND (
+                o."id"::text IN (res.r ->> 'custom_id', res.r -> 'purchase_units' -> 0 ->> 'custom_id', res.r -> 'payout_item' ->> 'sender_item_id')
+                OR o."paypal_order_id" IN (res.r ->> 'id', res.r -> 'supplementary_data' -> 'related_ids' ->> 'order_id')
+                OR o."paypal_authorization_id" IN (res.r ->> 'id', res.r -> 'supplementary_data' -> 'related_ids' ->> 'authorization_id')
+                OR o."paypal_capture_id" IN (
+                  res.r ->> 'id',
+                  res.r -> 'supplementary_data' -> 'related_ids' ->> 'capture_id',
+                  res.r -> 'disputed_transactions' -> 0 ->> 'seller_transaction_id'
+                )
+                OR o."paypal_payout_item_id" = res.r ->> 'payout_item_id'
+                OR o."paypal_payout_batch_id" = res.r ->> 'payout_batch_id'
+              )
+          ))
+        )
+    )`;
+}
+
+/** Claims up to `limit` due rows (PENDING, or PROCESSING with an expired lease) for this relay. */
+export async function claimOutboxBatch(
+  now: Date,
+  limit = DRAIN_BATCH_SIZE,
+  topics: OutboxTopicFilter = {},
+  { skipTestUsers = false }: { skipTestUsers?: boolean } = {},
+): Promise<OutboxEvent[]> {
+  const leaseUntil = new Date(now.getTime() + LEASE_MS);
   return prisma.$queryRaw<OutboxEvent[]>`
     UPDATE "outbox"
     SET "status" = 'PROCESSING', "attempts" = "attempts" + 1, "next_attempt_at" = ${leaseUntil}
@@ -80,8 +130,7 @@ export async function claimOutboxBatch(now: Date, limit = DRAIN_BATCH_SIZE, { on
       WHERE "status" IN ('PENDING', 'PROCESSING')
         AND "next_attempt_at" <= ${now}
         AND "attempts" < ${MAX_ATTEMPTS}
-        AND (${onlyTopics}::text[] IS NULL OR "topic" = ANY(${onlyTopics}::text[]))
-        AND NOT ("topic" = ANY(${exceptTopics}::text[]))
+        ${scopeSql({ topics, skipTestUsers })}
       ORDER BY "next_attempt_at"
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -91,13 +140,18 @@ export async function claimOutboxBatch(now: Date, limit = DRAIN_BATCH_SIZE, { on
 
 /**
  * Rows whose last allowed attempt was claimed but never finished (the relay
- * died, or the handler outran its lease) can't be claimed again: dead-letter them.
+ * died, or the handler outran its lease) can't be claimed again: dead-letter
+ * them. Only rows in the relay's scope.
  */
-export async function deadLetterAbandoned(now: Date) {
-  const { count } = await prisma.outboxEvent.updateMany({
-    where: { status: "PROCESSING", nextAttemptAt: { lte: now }, attempts: { gte: MAX_ATTEMPTS } },
-    data: { status: "DEAD", lastError: "lease expired on the last attempt (relay stopped or handler too slow)" },
-  });
+export async function deadLetterAbandoned(now: Date, scope: OutboxScope = {}) {
+  const lastError = "lease expired on the last attempt (relay stopped or handler too slow)";
+  const count = await prisma.$executeRaw`
+    UPDATE "outbox"
+    SET "status" = 'DEAD', "last_error" = ${lastError}
+    WHERE "status" = 'PROCESSING'
+      AND "next_attempt_at" <= ${now}
+      AND "attempts" >= ${MAX_ATTEMPTS}
+      ${scopeSql(scope)}`;
   if (count > 0) console.error(`outbox: ${count} row(s) dead-lettered after an abandoned last attempt`);
   return count;
 }
@@ -152,10 +206,10 @@ export async function processOutboxEvent(
 /** One relay pass: dead-letter abandoned rows, then claim and process one batch. */
 export async function drainOutbox(
   handlers: OutboxHandlers,
-  { now = new Date(), limit = DRAIN_BATCH_SIZE, topics }: { now?: Date; limit?: number; topics?: OutboxTopicFilter } = {},
+  { now = new Date(), limit = DRAIN_BATCH_SIZE, topics, skipTestUsers = false }: { now?: Date; limit?: number } & OutboxScope = {},
 ): Promise<DrainResult> {
-  await deadLetterAbandoned(now);
-  const batch = await claimOutboxBatch(now, limit, topics);
+  await deadLetterAbandoned(now, { topics, skipTestUsers });
+  const batch = await claimOutboxBatch(now, limit, topics, { skipTestUsers });
   const result: DrainResult = { claimed: batch.length, done: 0, retried: 0, dead: 0 };
   // One at a time, in claim order (oldest first).
   for (const event of batch) {

@@ -2,6 +2,7 @@ import { type Db, prisma } from "../db.js";
 import { postTransaction } from "../ledger/postTransaction.js";
 import { StaleOrderError, transition } from "../orders/stateMachine.js";
 import { type PayPalClient, PayPalError } from "../paypal/client.js";
+import { orderScope } from "../testUsers.js";
 
 // Seller payouts (see CLAUDE.md "Payment model" and "Payouts"). After capture
 // the seller gets amount − platform fee through PayPal Payouts:
@@ -341,10 +342,11 @@ export async function processPayout(paypal: PayPalClient, orderId: string, now =
 /** Sends due payouts and checks unsettled ones, oldest first. */
 export async function sweepPayouts(
   paypal: PayPalClient,
-  { now = new Date(), limit = PAYOUT_BATCH_SIZE }: { now?: Date; limit?: number } = {},
+  { now = new Date(), limit = PAYOUT_BATCH_SIZE, skipTestUsers = false }: { now?: Date; limit?: number; skipTestUsers?: boolean } = {},
 ): Promise<PayoutSweepResult> {
   const due = await prisma.order.findMany({
     where: {
+      ...orderScope(skipTestUsers), // see src/testUsers.ts
       OR: [
         { state: { in: [...READY_TO_PAY] }, capturedAt: { lte: now }, seller: { paypalEmail: { not: null } } },
         { state: "PAYOUT_RETRY", payoutAttempts: { lt: MAX_PAYOUT_ATTEMPTS }, payoutNextAttemptAt: { lte: now } },

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signSessionToken, signVerifyEmailToken } from "../src/auth/tokens.js";
-import { type Api, TEST_PASSWORD, cleanup, createTestUser, login, prisma, schoolEmail, startApi } from "./helpers/api.js";
+import { TEST_USER_EMAIL_PREFIX } from "../src/testUsers.js";
+import { type Api, TEST_PASSWORD, cleanup, createTestUser, login, prisma, schoolEmail, signupEmail, startApi } from "./helpers/api.js";
 
 let api: Api;
 
@@ -31,8 +32,19 @@ describe("POST /api/auth/signup", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects an address reserved for test users (the worker skips their data) and creates no user", async () => {
+    const email = schoolEmail("reserved");
+    expect(email.startsWith(TEST_USER_EMAIL_PREFIX)).toBe(true);
+    for (const attempt of [email, `  ${email.toUpperCase()} `]) {
+      const res = await api.call("POST", "/auth/signup", { json: { email: attempt, password: TEST_PASSWORD, displayName: "Nope" } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/can't be used to sign up/);
+    }
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  });
+
   it("accepts a school email, unverified, and never returns the password hash", async () => {
-    const email = schoolEmail("signup");
+    const email = signupEmail("signup");
     const res = await api.call("POST", "/auth/signup", { json: { email, password: TEST_PASSWORD, displayName: "New Student" } });
 
     expect(res.status).toBe(201);
@@ -41,7 +53,7 @@ describe("POST /api/auth/signup", () => {
   });
 
   it("rejects a second account with the same email", async () => {
-    const user = await createTestUser("dupe");
+    const user = await createTestUser("dupe", { email: signupEmail("dupe") });
     const res = await api.call("POST", "/auth/signup", { json: { email: user.email, password: TEST_PASSWORD, displayName: "Again" } });
     expect(res.status).toBe(409);
   });

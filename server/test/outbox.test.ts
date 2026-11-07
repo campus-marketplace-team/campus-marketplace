@@ -26,7 +26,8 @@ import { cleanup, createTestUser, prisma } from "./helpers/api.js";
 // The database is shared with real rows, so relay tests run in the year 2001:
 // their rows are due around NOW, and a drain "at" NOW can't claim any real row
 // (all due far later). Their topics carry this run's id and are deleted after
-// each test. Don't run the worker while the tests run: it would claim these rows.
+// each test. The real worker leaves them alone: it only claims topics it has
+// handlers for, and skips test users' rows (src/testUsers.ts).
 
 const NOW = new Date("2001-03-01T12:00:00.000Z");
 const SECOND = 1000;

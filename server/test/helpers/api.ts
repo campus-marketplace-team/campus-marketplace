@@ -7,6 +7,7 @@ import { getAuthConfig } from "../../src/auth/config.js";
 import { hashPassword } from "../../src/auth/password.js";
 import { prisma } from "../../src/db.js";
 import type { RiskClassification } from "../../src/risk/classifier.js";
+import { TEST_USER_EMAIL_PREFIX } from "../../src/testUsers.js";
 
 // API tests run the real app against the real database (DATABASE_URL), on a
 // random local port. Every user they create has an email starting with
@@ -15,11 +16,16 @@ import type { RiskClassification } from "../../src/risk/classifier.js";
 // not touch another file's users; leftovers from a crashed run are swept once
 // they're an hour old.
 
-export const TEST_EMAIL_PREFIX = "apitest.";
+// The deployed worker skips every user with this prefix (src/testUsers.ts), so tests' rows never reach PayPal or Claude.
+export const TEST_EMAIL_PREFIX = TEST_USER_EMAIL_PREFIX;
 export const TEST_PASSWORD = "test-password-1";
 
 // Vitest loads this module once per test file, so each file gets its own id.
-const RUN_PREFIX = `${TEST_EMAIL_PREFIX}${randomUUID().slice(0, 8)}.`;
+const RUN_ID = randomUUID().slice(0, 8);
+const RUN_PREFIX = `${TEST_EMAIL_PREFIX}${RUN_ID}.`;
+// Sign-up rejects TEST_EMAIL_PREFIX, so tests that sign up through the API use
+// this one. cleanup() only deletes this file's own (no stale sweep), so it can't touch a real user.
+const SIGNUP_RUN_PREFIX = `signup.${RUN_ID}.`;
 const STALE_AFTER_MS = 60 * 60 * 1000;
 
 export type Api = {
@@ -75,11 +81,16 @@ export function schoolEmail(label: string) {
   return `${RUN_PREFIX}${label}.${randomUUID().slice(0, 8)}@${getAuthConfig().allowedEmailDomains[0]}`;
 }
 
+/** A unique school address for signing up through the API (which refuses TEST_EMAIL_PREFIX). No orders: the worker doesn't skip it. */
+export function signupEmail(label: string) {
+  return `${SIGNUP_RUN_PREFIX}${label}.${randomUUID().slice(0, 8)}@${getAuthConfig().allowedEmailDomains[0]}`;
+}
+
 /** Creates a user directly in the DB (verified unless told otherwise) with TEST_PASSWORD. */
-export async function createTestUser(label: string, { verified = true } = {}) {
+export async function createTestUser(label: string, { verified = true, email = schoolEmail(label) } = {}) {
   return prisma.user.create({
     data: {
-      email: schoolEmail(label),
+      email,
       displayName: `Test ${label}`,
       passwordHash: await hashPassword(TEST_PASSWORD),
       emailVerifiedAt: verified ? new Date() : null,
@@ -100,6 +111,7 @@ export async function cleanup() {
     where: {
       OR: [
         { email: { startsWith: RUN_PREFIX } },
+        { email: { startsWith: SIGNUP_RUN_PREFIX } },
         { email: { startsWith: TEST_EMAIL_PREFIX }, createdAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } },
       ],
     },

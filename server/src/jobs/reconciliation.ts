@@ -1,6 +1,7 @@
 import { type Db, prisma } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { type PaymentRecord, type PayPalClient, PayPalError, type PayoutItemStatus } from "../paypal/client.js";
+import { orderScope } from "../testUsers.js";
 
 // Reconciliation (see CLAUDE.md "Reliability rules"): PayPal is the source of
 // truth for money, so every few minutes a batch of orders is compared with
@@ -216,17 +217,19 @@ export async function reconcileOrder(
   }
 }
 
-/** Reconciles the orders with PayPal records that were checked longest ago (never-checked first). */
+/** Reconciles the orders with PayPal records that were checked longest ago (never-checked first). `skipTestUsers`: see src/testUsers.ts. */
 export async function sweepReconciliation(
   paypal: PayPalClient,
   {
     now = new Date(),
     limit = RECONCILE_BATCH_SIZE,
     readLedger = ledgerTotals,
-  }: { now?: Date; limit?: number; readLedger?: (orderId: string) => Promise<LedgerTotals> } = {},
+    skipTestUsers = false,
+  }: { now?: Date; limit?: number; readLedger?: (orderId: string) => Promise<LedgerTotals>; skipTestUsers?: boolean } = {},
 ): Promise<ReconcileSweepResult> {
   const due = await prisma.order.findMany({
     where: {
+      ...orderScope(skipTestUsers),
       updatedAt: { lte: new Date(now.getTime() - QUIET_MS) },
       OR: [{ paypalAuthorizationId: { not: null } }, { paypalCaptureId: { not: null } }, { paypalPayoutBatchId: { not: null } }],
     },

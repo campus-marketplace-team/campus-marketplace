@@ -6,7 +6,12 @@ import { type Prisma, PrismaClient } from "./generated/prisma/client.js";
 // pool (pg's default is 10); the worker sets it low because Supabase's session
 // pooler allows few clients and the API shares them. With the pg adapter,
 // Prisma's `connection_limit` URL parameter is ignored, so it's set here.
-function poolMax(): number | undefined {
+
+/** pg's own pool size when DATABASE_POOL_MAX is unset. */
+export const PG_DEFAULT_POOL_MAX = 10;
+
+/** DATABASE_POOL_MAX, or undefined (pg's default) when it's unset. */
+export function poolMax(): number | undefined {
   const raw = process.env.DATABASE_POOL_MAX?.trim();
   if (!raw) return undefined;
   const max = Number(raw);

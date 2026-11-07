@@ -9,6 +9,7 @@ import { chatRouter } from "./routes/chat.js";
 import { listingsRouter } from "./routes/listings.js";
 import { createOrdersRouter } from "./routes/orders.js";
 import { createWebhooksRouter } from "./routes/webhooks.js";
+import { getWorkerStatus } from "./worker/status.js";
 
 // Origins allowed to call the API from a browser, e.g. the Vercel URL.
 // Comma-separated in CORS_ORIGINS. Empty in local dev, where Vite proxies /api.
@@ -69,8 +70,9 @@ export function createApp({
   app.use("/api/webhooks", createWebhooksRouter(paypal));
 
   // Cheap liveness check for the host's health checks; does not touch the DB, and isn't rate limited.
+  // Also says whether the worker runs in this process and when it last finished a job or relay pass.
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, worker: getWorkerStatus() });
   });
 
   const limiters = createRateLimiters(rateLimits);

@@ -2,6 +2,7 @@ import { type Db, prisma } from "../db.js";
 import { postTransaction } from "../ledger/postTransaction.js";
 import { type PayPalClient, PayPalError } from "../paypal/client.js";
 import { StaleOrderError, transition } from "../orders/stateMachine.js";
+import { orderScope } from "../testUsers.js";
 
 // Handoff deadline sweeper (see CLAUDE.md "Payment model"): an AUTHORIZED
 // order with no QR scan within 72 hours is voided, so the buyer is never
@@ -171,13 +172,13 @@ export async function voidAndRecord(
   return "voided";
 }
 
-/** Finds AUTHORIZED orders past their handoff deadline (plus grace) and voids them, oldest first. */
+/** Finds AUTHORIZED orders past their handoff deadline (plus grace) and voids them, oldest first. `skipTestUsers`: see src/testUsers.ts. */
 export async function sweepHandoffDeadlines(
   paypal: PayPalClient,
-  { now = new Date(), limit = SWEEP_BATCH_SIZE }: { now?: Date; limit?: number } = {},
+  { now = new Date(), limit = SWEEP_BATCH_SIZE, skipTestUsers = false }: { now?: Date; limit?: number; skipTestUsers?: boolean } = {},
 ): Promise<SweepResult> {
   const overdue = await prisma.order.findMany({
-    where: { state: "AUTHORIZED", handoffDeadline: { lt: cutoff(now) } },
+    where: { state: "AUTHORIZED", handoffDeadline: { lt: cutoff(now) }, ...orderScope(skipTestUsers) },
     orderBy: { handoffDeadline: "asc" },
     take: limit,
     select: { id: true },
