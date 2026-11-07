@@ -20,6 +20,7 @@ const INPUT: RiskInput = {
     sellerPastDisputes: 0,
     buyerPastDisputes: 0,
     offPlatformPhrases: [],
+    injectionPhrases: [],
   },
   chat: [{ id: "m1", sender: "seller", body: "Meet at the library?" }],
   omittedChatMessages: 0,
@@ -132,6 +133,12 @@ describe("classifyRisk", () => {
 });
 
 describe("buildRiskPrompt", () => {
+  it("doesn't send the injection detector's hits, so the classifier's answer stays independent of them", () => {
+    const prompt = buildRiskPrompt({ ...INPUT, features: { ...INPUT.features, injectionPhrases: [{ phrase: "note_to_ai", messageId: null, sender: "seller" }] } });
+    expect(prompt).not.toContain("injectionPhrases");
+    expect(prompt).not.toContain("note_to_ai");
+  });
+
   it("keeps listing and chat text in their own untrusted sections", () => {
     const prompt = buildRiskPrompt(INPUT);
     expect(section(prompt, "untrusted_listing")).toEqual({ title: INPUT.listing.title, description: INPUT.listing.description });

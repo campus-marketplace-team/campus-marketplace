@@ -44,6 +44,7 @@ const INPUT: RiskInput = {
     sellerPastDisputes: 0,
     buyerPastDisputes: 0,
     offPlatformPhrases: [],
+    injectionPhrases: [],
   },
   chat: [],
   omittedChatMessages: 0,

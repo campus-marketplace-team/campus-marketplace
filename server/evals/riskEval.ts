@@ -1,6 +1,6 @@
 import type { Classify } from "../src/risk/assess.js";
 import type { RiskClassification, RiskInput } from "../src/risk/classifier.js";
-import { findOffPlatformPhrases, type RiskFeatures } from "../src/risk/features.js";
+import { findInjectionHits, findOffPlatformPhrases, type RiskFeatures } from "../src/risk/features.js";
 import { applyRiskPolicy, type RiskPolicyDecision } from "../src/risk/policy.js";
 import type { RiskEvalCase, RiskEvalGroup } from "./riskCases.js";
 
@@ -31,6 +31,7 @@ export function buildRiskInput(testCase: RiskEvalCase): RiskInput {
     sellerPastDisputes: seller.pastDisputes ?? 0,
     buyerPastDisputes,
     offPlatformPhrases: chat.flatMap(({ id, sender, body }) => findOffPlatformPhrases(body).map((phrase) => ({ phrase, messageId: id, sender }))),
+    injectionPhrases: findInjectionHits(listing, chat),
   };
   return { listing: { ...listing, currency: "USD" }, features, chat, omittedChatMessages: 0 };
 }

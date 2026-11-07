@@ -1,12 +1,12 @@
 import type { Db } from "../db.js";
 
 // Deterministic risk features for an order (see CLAUDE.md "AI"). These are the
-// first step of the risk engine: the LLM classifier reads them and the policy
-// layer's hard rules are based on them.
+// first step of the risk engine: the LLM classifier reads them (except the
+// injection phrases) and the policy layer's hard rules are based on them.
 //
 // The result holds only numbers, our own phrase ids and row ids, never listing
-// or chat text. Chat is untrusted input, so a message can trip a phrase id but
-// can't put its own words into the features.
+// or chat text. Listings and chat are untrusted input, so they can trip a phrase
+// id but can't put their own words into the features.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -73,21 +73,106 @@ function normalize(text: string): string {
     .trim();
 }
 
-/**
- * The off-platform payment phrases found in a piece of text. Checks the text
- * as written and with leetspeak undone ("c@sh app", "v3nmo"), separately, so
- * ordinary digits like prices can't hide a match. Accents and invisible
- * characters are removed first.
- */
-export function findOffPlatformPhrases(text: string): OffPlatformPhrase[] {
-  const folded = text
-    .normalize("NFKD")
-    .replace(/[\p{M}\p{Cf}]/gu, "")
+/** Removes accents and invisible characters. Keeps case and punctuation. */
+function stripInvisible(text: string): string {
+  return text.normalize("NFKD").replace(/[\p{M}\p{Cf}]/gu, "");
+}
+
+function fold(text: string): string {
+  return stripInvisible(text)
     .toLowerCase()
     .replace(LOOKALIKE_RE, (ch) => LOOKALIKES[ch]);
-  const plain = normalize(folded);
-  const unleet = normalize(folded.replace(/[@$!013457]/g, (ch) => LEET[ch]));
-  return PHRASES.filter(([, pattern]) => pattern.test(plain) || pattern.test(unleet)).map(([phrase]) => phrase);
+}
+
+/** A folded text as written and with leetspeak undone, normalized separately so ordinary digits can't hide a match. */
+function wordForms(folded: string): string[] {
+  return [normalize(folded), normalize(folded.replace(/[@$!013457]/g, (ch) => LEET[ch]))];
+}
+
+/**
+ * The off-platform payment phrases found in a piece of text. Checks the text
+ * as written and with leetspeak undone ("c@sh app", "v3nmo"). Accents and
+ * invisible characters are removed first.
+ */
+export function findOffPlatformPhrases(text: string): OffPlatformPhrase[] {
+  const forms = wordForms(fold(text));
+  return PHRASES.filter(([, pattern]) => forms.some((form) => pattern.test(form))).map(([phrase]) => phrase);
+}
+
+// ---------- Prompt-injection phrases ----------
+
+/**
+ * Text trying to steer the risk assessment. The floor these set has to hold when
+ * the classifier has been fooled, so unlike the classifier's prompt_injection
+ * signal this doesn't depend on it. Like the off-platform phrases, a hit is only a
+ * signal: the policy layer holds the order with a warning, and never blocks on it.
+ *
+ * Matched against normalize()'s output, with no punctuation left. "ignore the
+ * instructions" is left out because of "ignore the instructions on the box".
+ */
+const INJECTION_WORD_PATTERNS = {
+  ignore_instructions:
+    /\b(?:(?:ignore|disregard|forget|override) (?!the (?:instructions?|prompts?|guidelines?)\b)(?:(?:all|any|every|of|the|your|prior|previous|above|earlier|preceding|system) ){0,5}(?:instructions?|prompts?|guidelines?)|(?:ignore|disregard) (?:all |everything )?(?:of )?(?:the )?above|(?:ignora|ignorar|ignore|olvida) (?:\w+ ){0,3}instrucciones)\b/,
+  note_to_ai:
+    /\b(?:notes?|messages?|instructions?|attention|memo) (?:to|for) (?:(?:the|any|all|our) )?(?:ai(?: model)?|llm|assistant|assessor|reviewer|moderator|classifier|bot|checker)s?\b/,
+  mark_low_risk: /\b(?:mark(?:ed)?|rate|classif(?:y|ied)|flag|label|score|report|treat|assess|consider|approve)(?: \w+){0,4} (?:as |at )?low risk\b/,
+  prior_assessment: /\b(?:prior|previous|earlier|past|last) (?:(?:risk|fraud|manual) )?(?:assessment|classification|evaluation)\b/,
+} as const;
+
+/**
+ * Matched against fold()'s output, because these rely on punctuation. A role name
+ * counts only at the start of the text or after a delimiter, so "Operating system:
+ * Windows 11" doesn't match.
+ */
+const INJECTION_MARKUP_PATTERNS = {
+  role_marker:
+    /(?:^|[\n.!?;:>\]{}()"'*#-])\s*(?:system|assistant|developer|admin(?:istrator)?)\s*:|\[\s*(?:system|assistant|developer|admin(?:istrator)?)\b|<\s*\/?\s*(?:system|assistant|instructions?|facts|untrusted\w*)\b/,
+  addresses_ai: /\b(?:ai|llm|automated)\s+(?:assessors?|reviewers?|moderators?|classifiers?|checkers?|systems?|agents?)\s*[:,]/,
+  forged_result: /["']?\brisk["']?\s*[:=]\s*["']?(?:low|medium|high)\b/,
+} as const;
+
+/**
+ * Long enough to carry an instruction. Needs upper and lower case, so hex hashes
+ * don't count, and has no "/", "-" or "_", so URLs and slugs don't either.
+ */
+const BASE64_BLOB_RE = /[A-Za-z0-9+]{40,}={0,2}/g;
+
+export type InjectionPhrase = keyof typeof INJECTION_WORD_PATTERNS | keyof typeof INJECTION_MARKUP_PATTERNS | "base64_blob";
+
+const INJECTION_WORD_PHRASES = Object.entries(INJECTION_WORD_PATTERNS) as [InjectionPhrase, RegExp][];
+const INJECTION_MARKUP_PHRASES = Object.entries(INJECTION_MARKUP_PATTERNS) as [InjectionPhrase, RegExp][];
+
+function hasBase64Blob(text: string): boolean {
+  return (stripInvisible(text).match(BASE64_BLOB_RE) ?? []).some((blob) => /[a-z]/.test(blob) && /[A-Z]/.test(blob));
+}
+
+/** The prompt-injection phrases found in a piece of text. Same evasion handling as findOffPlatformPhrases. */
+export function findInjectionPhrases(text: string): InjectionPhrase[] {
+  const folded = fold(text);
+  const forms = wordForms(folded);
+  return [
+    ...INJECTION_WORD_PHRASES.filter(([, pattern]) => forms.some((form) => pattern.test(form))).map(([phrase]) => phrase),
+    ...INJECTION_MARKUP_PHRASES.filter(([, pattern]) => pattern.test(folded)).map(([phrase]) => phrase),
+    ...(hasBase64Blob(text) ? (["base64_blob"] as const) : []),
+  ];
+}
+
+export type InjectionHit = {
+  phrase: InjectionPhrase;
+  /** The chat message it was found in, or null for the listing. */
+  messageId: string | null;
+  sender: "buyer" | "seller";
+};
+
+/** Every injection phrase in a listing and its chat: listing first, then one entry per phrase per message. */
+export function findInjectionHits(
+  listing: { title: string; description: string },
+  messages: { id: string; sender: "buyer" | "seller"; body: string }[],
+): InjectionHit[] {
+  return [
+    ...findInjectionPhrases(`${listing.title}\n${listing.description}`).map((phrase) => ({ phrase, messageId: null, sender: "seller" as const })),
+    ...messages.flatMap(({ id, sender, body }) => findInjectionPhrases(body).map((phrase) => ({ phrase, messageId: id, sender }))),
+  ];
 }
 
 // ---------- Price ----------
@@ -120,6 +205,8 @@ export type RiskFeatures = {
   buyerPastDisputes: number;
   /** One entry per phrase per message in this order's buyer/seller chat, oldest first. */
   offPlatformPhrases: { phrase: OffPlatformPhrase; messageId: string; sender: "buyer" | "seller" }[];
+  /** Injection phrases in the listing and this order's chat. Not sent to the classifier, so the floor stays independent of it. */
+  injectionPhrases: InjectionHit[];
 };
 
 /**
@@ -150,7 +237,7 @@ export async function computeRiskFeatures(db: Db, orderId: string, now: Date = n
       buyerId: true,
       sellerId: true,
       listingId: true,
-      listing: { select: { category: true } },
+      listing: { select: { category: true, title: true, description: true } },
       seller: { select: { createdAt: true } },
     },
   });
@@ -180,6 +267,7 @@ export async function computeRiskFeatures(db: Db, orderId: string, now: Date = n
   ]);
 
   const median = comparables.length >= MIN_COMPARABLE_LISTINGS ? medianCents(comparables.map((l) => l.priceCents)) : null;
+  const chat = messages.map(({ id, senderId, body }) => ({ id, body, sender: senderId === sellerId ? ("seller" as const) : ("buyer" as const) }));
 
   return {
     sellerAccountAgeDays: Math.max(0, Math.floor((now.getTime() - order.seller.createdAt.getTime()) / DAY_MS)),
@@ -192,12 +280,7 @@ export async function computeRiskFeatures(db: Db, orderId: string, now: Date = n
     },
     sellerPastDisputes,
     buyerPastDisputes,
-    offPlatformPhrases: messages.flatMap((message) =>
-      findOffPlatformPhrases(message.body).map((phrase) => ({
-        phrase,
-        messageId: message.id,
-        sender: message.senderId === sellerId ? ("seller" as const) : ("buyer" as const),
-      })),
-    ),
+    offPlatformPhrases: chat.flatMap(({ id, sender, body }) => findOffPlatformPhrases(body).map((phrase) => ({ phrase, messageId: id, sender }))),
+    injectionPhrases: findInjectionHits(order.listing, chat),
   };
 }

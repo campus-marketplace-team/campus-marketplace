@@ -7,8 +7,12 @@ import { defineConfig } from "vitest/config";
 // DATABASE_POOL_MAX): at most 12 for the suite. That's still enough for the
 // concurrency tests to use parallel connections. dotenv doesn't override a
 // variable that's already set, so this wins over any DATABASE_POOL_MAX in .env.
+//
+// Round trips to the remote database make a test that does several writes take
+// longer than vitest's default 5 s on a slow connection, hence the longer timeout.
 export default defineConfig({
   test: {
     env: { DATABASE_POOL_MAX: "4" },
+    testTimeout: 30_000,
   },
 });

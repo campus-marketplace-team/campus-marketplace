@@ -26,7 +26,10 @@ export type HardRule =
   | "very_low_price"
   | "many_recent_listings"
   | "many_past_disputes"
+  /** The classifier reported the prompt_injection signal. A fooled classifier won't. */
   | "prompt_injection"
+  /** Our own phrase detector found injection text, whatever the classifier said. */
+  | "injection_phrase"
   | "new_seller_off_platform_low_price";
 
 export type RiskPolicyDecision = {
@@ -57,6 +60,7 @@ function evaluateHardRules(features: RiskFeatures, signals: readonly string[]): 
   if (features.sellerListingsLast24h >= MANY_RECENT_LISTINGS) fired.push({ rule: "many_recent_listings", floor: "medium" });
   if (features.sellerPastDisputes >= MANY_PAST_DISPUTES) fired.push({ rule: "many_past_disputes", floor: "medium" });
   if (signals.includes("prompt_injection")) fired.push({ rule: "prompt_injection", floor: "medium" });
+  if (features.injectionPhrases.length > 0) fired.push({ rule: "injection_phrase", floor: "medium" });
 
   // Blocks without the classifier's help, so injection can't rescue the classic scam.
   // Only the seller's own words count: a buyer's message can't get a seller's listing blocked.

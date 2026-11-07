@@ -10,6 +10,7 @@ const calm: RiskFeatures = {
   sellerPastDisputes: 0,
   buyerPastDisputes: 0,
   offPlatformPhrases: [],
+  injectionPhrases: [],
 };
 
 const withRatio = (ratioToMedian: number | null): RiskFeatures["price"] => ({ ...calm.price, ratioToMedian });
@@ -28,6 +29,7 @@ describe("applyRiskPolicy", () => {
     ["a very low price", { price: withRatio(0.25) }, "very_low_price"],
     ["a burst of listings", { sellerListingsLast24h: 10 }, "many_recent_listings"],
     ["many past disputes", { sellerPastDisputes: 3 }, "many_past_disputes"],
+    ["an injection phrase", { injectionPhrases: [{ phrase: "ignore_instructions", messageId: null, sender: "seller" }] }, "injection_phrase"],
   ])("%s holds the order even when the classifier says low", (_name, change, rule) => {
     const decision = applyRiskPolicy({ ...calm, ...change }, llm("low"));
     expect(decision).toMatchObject({ risk: "medium", outcome: "HOLD_WITH_WARNING", floor: "medium" });
@@ -37,6 +39,16 @@ describe("applyRiskPolicy", () => {
   it("holds an order the classifier flagged for injection but rated low", () => {
     const decision = applyRiskPolicy(calm, llm("low", ["prompt_injection"]));
     expect(decision).toMatchObject({ outcome: "HOLD_WITH_WARNING", hardRules: ["prompt_injection"] });
+  });
+
+  it("holds rather than blocks on an injection phrase, even from a new seller at a low price", () => {
+    const features: RiskFeatures = {
+      ...calm,
+      sellerAccountAgeDays: 0,
+      price: withRatio(0.5),
+      injectionPhrases: [{ phrase: "note_to_ai", messageId: "m1", sender: "seller" }],
+    };
+    expect(applyRiskPolicy(features, llm("low"))).toMatchObject({ risk: "medium", outcome: "HOLD_WITH_WARNING", floor: "medium", hardRules: ["injection_phrase"] });
   });
 
   it("leaves values just inside the thresholds alone", () => {

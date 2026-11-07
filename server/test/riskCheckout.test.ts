@@ -115,7 +115,7 @@ describe("risk check on POST /api/orders", () => {
     expect((await decisionsFor(res.body.orderId))[0]).toMatchObject({
       risk: "medium",
       outcome: "HOLD_WITH_WARNING",
-      evidence: { floor: "medium", hardRules: ["off_platform_payment"] },
+      evidence: { floor: "medium", hardRules: ["off_platform_payment", "injection_phrase"] },
     });
   });
 

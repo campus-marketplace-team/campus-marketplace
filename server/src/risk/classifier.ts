@@ -147,13 +147,15 @@ export function capRiskInput(input: RiskInput): RiskInput {
 }
 
 export function buildRiskPrompt({ listing, features, chat, omittedChatMessages }: RiskInput): string {
-  const { offPlatformPhrases } = features;
+  // The injection hits stay out: Claude reads the same text anyway, and the policy
+  // layer's floor from them is meant to be independent of what Claude concludes.
+  const { offPlatformPhrases, injectionPhrases: _injectionPhrases, ...sentFeatures } = features;
   const facts = {
     category: listing.category,
     listingPriceCents: listing.priceCents,
     currency: listing.currency,
     omittedChatMessages,
-    ...features,
+    ...sentFeatures,
     offPlatformPhrases: offPlatformPhrases.slice(-MAX_PROMPT_PHRASE_HITS),
     offPlatformPhraseCount: offPlatformPhrases.length,
   };

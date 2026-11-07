@@ -15,6 +15,7 @@ const CALM_FEATURES: RiskInput["features"] = {
   sellerPastDisputes: 0,
   buyerPastDisputes: 0,
   offPlatformPhrases: [],
+  injectionPhrases: [],
 };
 
 const CASES: { name: string; input: RiskInput }[] = [
