@@ -98,7 +98,7 @@ describe("POST /api/orders/:id/dispute", () => {
     const row = await prisma.dispute.findUniqueOrThrow({ where: { orderId: order.id } });
     expect(row).toMatchObject({ openedById: buyerId, ...report, status: "OPEN" });
 
-    const outbox = await prisma.outboxEvent.findMany({ where: { orderId: order.id } });
+    const outbox = await prisma.outboxEvent.findMany({ where: { orderId: order.id, topic: "order.state_changed" } });
     expect(outbox.map((e) => e.payload)).toEqual([{ from: "AUTHORIZED", to: "IN_DISPUTE", version: 2 }]);
   });
 
@@ -189,7 +189,8 @@ describe("POST /api/orders/:id/dispute", () => {
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(after).toMatchObject({ state: "IN_DISPUTE", version: 2 });
     expect(await prisma.dispute.count({ where: { orderId: order.id } })).toBe(1);
-    expect(await prisma.outboxEvent.count({ where: { orderId: order.id } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { orderId: order.id, topic: "order.state_changed" } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { orderId: order.id, topic: "dispute.needs_decision" } })).toBe(1);
   });
 
   it("stops the handoff: no new QR code, and the deadline sweeper leaves it alone", async () => {

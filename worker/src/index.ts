@@ -11,6 +11,7 @@ import {
   sweepHandoffDeadlines,
   sweepPayouts,
   sweepReconciliation,
+  SLOW_OUTBOX_TOPICS,
 } from "server/jobs";
 
 // Background jobs on pg-boss, which keeps its queue in the same Postgres (its
@@ -31,6 +32,9 @@ if (!connectionString) {
 
 // Fail fast on missing PayPal settings instead of on the first overdue order.
 const paypal = getPayPalClient();
+
+// Not fatal: without it the dispute agent's calls fail, and every dispute goes to an admin.
+if (!process.env.ANTHROPIC_API_KEY) console.warn("ANTHROPIC_API_KEY is not set: disputes will go straight to an admin");
 
 // No LISTEN/NOTIFY: it would hold one more connection outside `max`. The sweep runs on a schedule anyway.
 const boss = new PgBoss({ connectionString, max: WORKER_DB_POOL_MAX, useListenNotify: false });
@@ -92,42 +96,49 @@ await boss.work(DISPUTE_DECISIONS_QUEUE, async () => {
 // Outbox relay: a plain polling loop rather than a pg-boss schedule, whose
 // cron granularity (one minute) is coarser than the outbox's 30 s first retry.
 // The claim uses FOR UPDATE SKIP LOCKED, so running several workers is safe.
+// Slow topics (a dispute agent run takes minutes) get their own relay, one row at
+// a time, so they don't hold up webhooks or outlast the lease on a claimed batch.
 const OUTBOX_POLL_MS = 5_000;
 let stopping = false;
-let wakeRelay: (() => void) | undefined;
+const wakeRelays = new Set<() => void>();
 
-async function runOutboxRelay() {
+async function runOutboxRelay(name: string, options: Parameters<typeof drainOutbox>[1] & { limit: number }) {
   while (!stopping) {
     let busy = false;
     try {
-      const result = await drainOutbox(outboxHandlers);
-      if (result.claimed > 0) console.log("outbox drain:", result);
-      busy = result.claimed === DRAIN_BATCH_SIZE; // a full batch: more may be waiting
+      const result = await drainOutbox(outboxHandlers, options);
+      if (result.claimed > 0) console.log(`${name} drain:`, result);
+      busy = result.claimed === options.limit; // a full batch: more may be waiting
     } catch (err) {
-      console.error("outbox relay error:", (err as Error).message);
+      console.error(`${name} error:`, (err as Error).message);
     }
     if (!busy && !stopping) {
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, OUTBOX_POLL_MS);
-        wakeRelay = () => {
+        const wake = () => {
           clearTimeout(timer);
+          wakeRelays.delete(wake);
           resolve();
         };
+        const timer = setTimeout(wake, OUTBOX_POLL_MS);
+        wakeRelays.add(wake);
       });
     }
   }
 }
-const outboxRelay = runOutboxRelay();
+const outboxRelays = Promise.all([
+  runOutboxRelay("outbox relay", { limit: DRAIN_BATCH_SIZE, topics: { except: SLOW_OUTBOX_TOPICS } }),
+  runOutboxRelay("slow outbox relay", { limit: 1, topics: { only: SLOW_OUTBOX_TOPICS } }),
+]);
 
 console.log(
-  `Worker started: ${HANDOFF_DEADLINE_QUEUE} and ${PAYOUTS_QUEUE} every minute, ${AUTHORIZATION_EXPIRY_QUEUE} and ${RECONCILIATION_QUEUE} every 5 minutes, outbox relay every ${OUTBOX_POLL_MS / 1000}s`,
+  `Worker started: ${HANDOFF_DEADLINE_QUEUE} and ${PAYOUTS_QUEUE} every minute, ${AUTHORIZATION_EXPIRY_QUEUE} and ${RECONCILIATION_QUEUE} every 5 minutes, outbox relays every ${OUTBOX_POLL_MS / 1000}s`,
 );
 
 async function shutdown(signal: string) {
   console.log(`${signal} received, stopping worker`);
   stopping = true;
-  wakeRelay?.();
-  await outboxRelay; // let an in-flight batch finish recording its results
+  for (const wake of [...wakeRelays]) wake();
+  await outboxRelays; // let in-flight rows finish recording their results
   await boss.stop({ graceful: true });
   await prisma.$disconnect();
   process.exit(0);

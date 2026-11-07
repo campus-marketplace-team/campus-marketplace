@@ -23,6 +23,7 @@
     "admin:grant": "tsx scripts/grant-admin.ts",
     "risk:classify": "tsx scripts/risk-classify.ts",
     "risk:eval": "tsx scripts/risk-eval.ts",
+    "dispute:agent": "tsx scripts/dispute-agent.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "keywords": [],

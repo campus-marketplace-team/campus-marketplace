@@ -8,5 +8,5 @@ export { type ExpirySweepResult, sweepExpiringAuthorizations } from "./authoriza
 export { type ReconcileSweepResult, sweepReconciliation } from "./reconciliation.js";
 export { type PayoutSweepResult, sweepPayouts } from "../payouts/payouts.js";
 export { type DisputeRetrySweepResult, sweepApprovedDisputeDecisions } from "../disputes/actionTools.js";
-export { outboxHandlers } from "../outbox/handlers.js";
+export { outboxHandlers, SLOW_OUTBOX_TOPICS } from "../outbox/handlers.js";
 export { DRAIN_BATCH_SIZE, type DrainResult, drainOutbox } from "../outbox/outbox.js";

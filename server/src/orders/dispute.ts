@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DISPUTE_LIMITS, isDisputeReason } from "@campus/shared";
 import { prisma } from "../db.js";
 import { isUuid } from "../ids.js";
+import { DISPUTE_PHOTO_GRACE_MS, enqueueDisputeDecision } from "../outbox/handlers.js";
 import { deleteObject, getStorageConfig, sniffImage, uploadObject } from "../storage.js";
 import { CheckoutError, getOrderView } from "./checkout.js";
 import { StaleOrderError, transition } from "./stateMachine.js";
@@ -79,6 +80,7 @@ export async function openDispute(userId: string, orderId: unknown, body: unknow
       await tx.dispute.create({
         data: { orderId: id, openedById: buyerId, reason: input.reason, description: input.description, photoUrls: [] },
       });
+      await enqueueDisputeDecision(tx, id, { delayMs: DISPUTE_PHOTO_GRACE_MS });
     });
   } catch (err) {
     if (err instanceof StaleOrderError) {

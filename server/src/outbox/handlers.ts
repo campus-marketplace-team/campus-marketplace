@@ -1,8 +1,9 @@
 import { isOrderState, type OrderState } from "@campus/shared";
-import { prisma } from "../db.js";
+import { type Db, prisma } from "../db.js";
+import { getPayPalClient } from "../paypal/client.js";
 import { PAYPAL_WEBHOOK_TOPIC } from "../webhooks/ingest.js";
 import { handlePayPalWebhookJob } from "../webhooks/process.js";
-import type { OutboxEvent, OutboxHandlers } from "./outbox.js";
+import { enqueueOutbox, type OutboxEvent, type OutboxHandlers } from "./outbox.js";
 
 // Side effects the worker's outbox relay delivers, by topic. Each runs at
 // least once per row, so each must be idempotent.
@@ -87,7 +88,30 @@ export async function notifyOrderStateChanged(event: OutboxEvent) {
   });
 }
 
+/** A dispute is waiting for a decision: the worker runs the dispute agent on it, or passes it to an admin. */
+export const DISPUTE_NEEDS_DECISION = "dispute.needs_decision";
+
+/** Topics whose handlers can take minutes. The worker relays them on their own, so they can't hold up webhooks and notifications. */
+export const SLOW_OUTBOX_TOPICS: readonly string[] = [DISPUTE_NEEDS_DECISION];
+
+/** A new report's photos upload just after it's created, and the agent should see them. */
+export const DISPUTE_PHOTO_GRACE_MS = 2 * 60 * 1000;
+
+/** Queues the decision in the caller's transaction. Uses the real clock: it's about when the worker may pick it up. */
+export function enqueueDisputeDecision(db: Db, orderId: string, { delayMs = 0 }: { delayMs?: number } = {}) {
+  return enqueueOutbox(db, { topic: DISPUTE_NEEDS_DECISION, orderId, payload: {}, availableAt: new Date(Date.now() + delayMs) });
+}
+
+async function decideDispute(event: OutboxEvent) {
+  if (!event.orderId) throw new Error("dispute.needs_decision row has no order");
+  // Imported here because the agent's module reaches back to this one through the state machine,
+  // and it needs its tool definitions at load time, which that cycle may not have reached yet.
+  const { handleDisputeNeedsDecision } = await import("../disputes/agent.js");
+  await handleDisputeNeedsDecision(getPayPalClient(), event.orderId);
+}
+
 export const outboxHandlers: OutboxHandlers = {
   [ORDER_STATE_CHANGED]: notifyOrderStateChanged,
   [PAYPAL_WEBHOOK_TOPIC]: handlePayPalWebhookJob,
+  [DISPUTE_NEEDS_DECISION]: decideDispute,
 };

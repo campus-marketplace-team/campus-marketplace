@@ -64,9 +64,14 @@ export function backoffMs(attempts: number) {
   return BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1);
 }
 
+/** Which topics a relay handles: only these, or all but these. Left out, it handles every topic. */
+export type OutboxTopicFilter = { only?: readonly string[]; except?: readonly string[] };
+
 /** Claims up to `limit` due rows (PENDING, or PROCESSING with an expired lease) for this relay. */
-export async function claimOutboxBatch(now: Date, limit = DRAIN_BATCH_SIZE): Promise<OutboxEvent[]> {
+export async function claimOutboxBatch(now: Date, limit = DRAIN_BATCH_SIZE, { only, except }: OutboxTopicFilter = {}): Promise<OutboxEvent[]> {
   const leaseUntil = new Date(now.getTime() + LEASE_MS);
+  const onlyTopics = only ? [...only] : null;
+  const exceptTopics = except ? [...except] : [];
   return prisma.$queryRaw<OutboxEvent[]>`
     UPDATE "outbox"
     SET "status" = 'PROCESSING', "attempts" = "attempts" + 1, "next_attempt_at" = ${leaseUntil}
@@ -75,6 +80,8 @@ export async function claimOutboxBatch(now: Date, limit = DRAIN_BATCH_SIZE): Pro
       WHERE "status" IN ('PENDING', 'PROCESSING')
         AND "next_attempt_at" <= ${now}
         AND "attempts" < ${MAX_ATTEMPTS}
+        AND (${onlyTopics}::text[] IS NULL OR "topic" = ANY(${onlyTopics}::text[]))
+        AND NOT ("topic" = ANY(${exceptTopics}::text[]))
       ORDER BY "next_attempt_at"
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -145,10 +152,10 @@ export async function processOutboxEvent(
 /** One relay pass: dead-letter abandoned rows, then claim and process one batch. */
 export async function drainOutbox(
   handlers: OutboxHandlers,
-  { now = new Date(), limit = DRAIN_BATCH_SIZE }: { now?: Date; limit?: number } = {},
+  { now = new Date(), limit = DRAIN_BATCH_SIZE, topics }: { now?: Date; limit?: number; topics?: OutboxTopicFilter } = {},
 ): Promise<DrainResult> {
   await deadLetterAbandoned(now);
-  const batch = await claimOutboxBatch(now, limit);
+  const batch = await claimOutboxBatch(now, limit, topics);
   const result: DrainResult = { claimed: batch.length, done: 0, retried: 0, dead: 0 };
   // One at a time, in claim order (oldest first).
   for (const event of batch) {

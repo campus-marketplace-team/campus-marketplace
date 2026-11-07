@@ -4,6 +4,7 @@ import { recordVoid } from "../jobs/handoffDeadline.js";
 import { postTransaction } from "../ledger/postTransaction.js";
 import { recordCapture } from "../orders/handoff.js";
 import { transition } from "../orders/stateMachine.js";
+import { enqueueDisputeDecision } from "../outbox/handlers.js";
 import { valueToCents } from "../paypal/client.js";
 import { recordPayoutFailed, recordPayoutSucceeded } from "../payouts/payouts.js";
 import type { WebhookEventHandler, WebhookOrder } from "./process.js";
@@ -268,6 +269,7 @@ export const onDisputeCreated: WebhookEventHandler = async ({ event, order, tx }
     ],
     skipDuplicates: true, // the buyer may have reported it in the app first
   });
+  await enqueueDisputeDecision(tx, order.id);
 };
 
 /** Handlers by event type. Types not listed stay unprocessed until one exists. */

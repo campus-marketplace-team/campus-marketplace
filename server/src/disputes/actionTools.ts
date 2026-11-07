@@ -8,6 +8,7 @@ import { ALREADY_CAPTURED, ALREADY_VOID } from "../jobs/handoffDeadline.js";
 import { type LedgerEntryInput, postTransaction } from "../ledger/postTransaction.js";
 import { CheckoutError } from "../orders/checkout.js";
 import { StaleOrderError, transition } from "../orders/stateMachine.js";
+import { enqueueDisputeDecision } from "../outbox/handlers.js";
 import { type PayPalClient, PayPalError } from "../paypal/client.js";
 import { encodeForPrompt } from "../risk/classifier.js";
 import { DisputeNotFoundError, type DisputeToolResult, getDisputedOrder, getDisputeLedgerEntries, getDisputeQrScanLog } from "./readTools.js";
@@ -192,7 +193,7 @@ async function loadPending(decisionId: unknown) {
     typeof decisionId === "string" && isUuid(decisionId)
       ? await prisma.decision.findFirst({
           where: { id: decisionId, kind: "DISPUTE" },
-          select: { id: true, disputeId: true, order: { select: { state: true, buyerId: true, sellerId: true } } },
+          select: { id: true, disputeId: true, order: { select: { id: true, state: true, buyerId: true, sellerId: true } } },
         })
       : null;
   if (!decision?.order) throw new CheckoutError(404, "NOT_FOUND", "Decision not found");
@@ -225,18 +226,23 @@ export async function rejectDisputeDecision(decisionId: unknown, adminId: string
       data: { actionStatus: "REJECTED", approverId: adminId, rejectedAt: now, reviewNote },
     });
     if (count === 0) throw notPending();
-    await unlockDispute(tx, decision.disputeId, decision.order.state);
+    await unlockDispute(tx, decision.disputeId, decision.order);
   });
   return (await readDecisionView(decision.id))!;
 }
 
-/** Lets a dispute take a new decision, if its order is still waiting for one. */
-async function unlockDispute(db: Db, disputeId: string | null, orderState: OrderState) {
-  if (!disputeId || (orderState !== "IN_DISPUTE" && orderState !== "ESCALATED")) return;
-  await db.dispute.updateMany({
+/**
+ * Lets a dispute take a new decision, if its order is still waiting for one. Only the
+ * agent decides an OPEN dispute and it gets one run, so a reopened dispute is queued
+ * for the worker, which passes it to an admin. Otherwise it would sit with nobody on it.
+ */
+async function unlockDispute(db: Db, disputeId: string | null, order: { id: string; state: OrderState }) {
+  if (!disputeId || (order.state !== "IN_DISPUTE" && order.state !== "ESCALATED")) return;
+  const { count } = await db.dispute.updateMany({
     where: { id: disputeId, status: "PENDING_APPROVAL" },
-    data: { status: orderState === "ESCALATED" ? "ESCALATED" : "OPEN" },
+    data: { status: order.state === "ESCALATED" ? "ESCALATED" : "OPEN" },
   });
+  if (count > 0 && order.state === "IN_DISPUTE") await enqueueDisputeDecision(db, order.id);
 }
 
 // ---------- Execution ----------
@@ -402,7 +408,7 @@ async function failDecision(decision: ExecutingDecision, message: string, { keep
       where: { id: decision.id, actionStatus: "APPROVED" },
       data: { actionStatus: "FAILED", actionError: message.slice(0, MAX_ERROR_LENGTH), ...(paypalRef ? { paypalTransactionId: paypalRef } : {}) },
     });
-    if (!keepLocked) await unlockDispute(tx, decision.disputeId, decision.order.state);
+    if (!keepLocked) await unlockDispute(tx, decision.disputeId, decision.order);
   });
 }
 

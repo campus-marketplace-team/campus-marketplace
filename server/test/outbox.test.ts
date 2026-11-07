@@ -83,6 +83,28 @@ function outboxFor(orderId: string) {
   return prisma.outboxEvent.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
 }
 
+describe("topic filters", () => {
+  const OTHER = `${TOPIC}.slow`;
+
+  it("lets one relay take only some topics and another take the rest", async () => {
+    const fast = await enqueue();
+    const slow = await enqueue({ topic: OTHER });
+    const fastClaim = await claimOutboxBatch(NOW, 20, { except: [OTHER] });
+    expect(fastClaim.map((row) => row.id)).toEqual([fast]);
+    const slowClaim = await claimOutboxBatch(NOW, 20, { only: [OTHER] });
+    expect(slowClaim.map((row) => row.id)).toEqual([slow]);
+  });
+
+  it("drains the filtered topics only", async () => {
+    const handler = vi.fn(async () => {});
+    await enqueue();
+    const slow = await enqueue({ topic: OTHER });
+    const result = await drainOutbox({ [TOPIC]: handler, [OTHER]: handler }, { now: NOW, limit: 1, topics: { only: [OTHER] } });
+    expect(result).toMatchObject({ claimed: 1, done: 1 });
+    expect((await readRow(slow)).status).toBe("DONE");
+  });
+});
+
 describe("transition() writes the outbox row in the same transaction", () => {
   it("writes one order.state_changed row per successful transition", async () => {
     const order = await createOrder();
