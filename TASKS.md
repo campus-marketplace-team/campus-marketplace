@@ -188,10 +188,10 @@ Goal: a judge understands the project in 3 minutes and can try it themselves.
 - [ ] **5.3 Demo seed data**
   > Read CLAUDE.md. Write a demo seed script with one normal completed sale, one blocked scam listing, and one open dispute. When done, tick task 5.3 in TASKS.md.
 
-- [ ] **5.4 Architecture diagram + payment tradeoff**
+- [x] **5.4 Architecture diagram + payment tradeoff** (docs/ARCHITECTURE.md: Mermaid system diagram, sale flow, reliability table, authorize-then-capture vs capture-and-hold with the regulatory note and the post-capture payout window as a known limitation. Docs only; no env vars or migrations.)
   > Read CLAUDE.md. Write docs/ARCHITECTURE.md with a Mermaid architecture diagram and a short section on the payment-model tradeoff (authorize-then-capture vs capture-and-hold, including the regulatory note about holding other people's money). When done, tick task 5.4 in TASKS.md.
 
-- [ ] **5.5 README**
+- [x] **5.5 README** (README.md rewritten for the finished app: how it works, PayPal APIs, AI design + eval results, reliability, test accounts + PayPal sandbox login, local setup, env var names, smoke tests; links docs/ARCHITECTURE.md. Docs only; no env vars or migrations.)
   > Read CLAUDE.md. Write the README: what the project is, setup steps, env vars (names only), how to use sandbox test accounts, and how to run evals. No real credentials. When done, tick task 5.5 in TASKS.md.
 
 - [ ] **5.6 Demo video** (manual)
