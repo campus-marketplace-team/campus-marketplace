@@ -5,7 +5,7 @@
 
 import { prisma } from "../src/db.js";
 import { hashPassword } from "../src/auth/password.js";
-import { SEED_LISTINGS, seedPhotoPath } from "./seedListings.js";
+import { SEED_LISTINGS, seedListingAction, seedPhotoPath } from "./seedListings.js";
 
 // Dev-only login for every seed user. Never use seed accounts with real money.
 const SEED_PASSWORD = "password123";
@@ -33,6 +33,7 @@ async function main() {
     await prisma.user.upsert({ where: { id: u.id }, create: { id: u.id, ...data }, update: data });
   }
 
+  const kept: string[] = [];
   for (const [i, l] of SEED_LISTINGS.entries()) {
     const id = seedId(201 + i);
     const data = {
@@ -42,12 +43,21 @@ async function main() {
       category: l.category,
       priceCents: l.priceCents,
       photoUrls: [seedPhotoPath(l.slug)],
-      status: "ACTIVE" as const,
     };
-    await prisma.listing.upsert({ where: { id }, create: { id, ...data }, update: data });
+    const existing = await prisma.listing.findUnique({ where: { id }, select: { status: true } });
+    const action = seedListingAction(existing?.status ?? null);
+    if (action === "create") {
+      await prisma.listing.create({ data: { id, ...data, status: "ACTIVE" } });
+    } else if (action === "update") {
+      // Only while still for sale: an order may reserve it between the read and this write.
+      await prisma.listing.updateMany({ where: { id, status: "ACTIVE" }, data });
+    } else {
+      kept.push(`${l.title} (${existing!.status})`);
+    }
   }
 
   console.log(`Seeded ${users.length} users and ${SEED_LISTINGS.length} listings.`);
+  if (kept.length) console.log(`Left alone because they're no longer for sale: ${kept.join(", ")}.`);
   console.log(`Seed users log in with password "${SEED_PASSWORD}".`);
 }
 

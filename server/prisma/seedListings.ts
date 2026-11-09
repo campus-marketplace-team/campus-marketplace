@@ -8,7 +8,7 @@
 // word must be how Pixabay tags the item (e.g. "sweatshirt", not "hoodie").
 // When search can't find a good product shot, pixabayId pins one image.
 
-import type { ListingCategory } from "../src/generated/prisma/client.js";
+import type { ListingCategory, ListingStatus } from "../src/generated/prisma/client.js";
 
 export type SeedListing = {
   title: string;
@@ -26,6 +26,18 @@ export type SeedListing = {
 
 /** Where the web app serves a seed listing's photo (client/public is the site root). */
 export const seedPhotoPath = (slug: string) => `/images/${slug}.webp`;
+
+/**
+ * What re-running the seed does to a seed listing, given its current status
+ * (null if it doesn't exist yet). Only a listing still for sale is refreshed:
+ * a reserved, sold or removed one belongs to an order (or its seller) now, and
+ * resetting it would put a sold item back on sale or change what a dispute
+ * shows was sold.
+ */
+export function seedListingAction(currentStatus: ListingStatus | null): "create" | "update" | "keep" {
+  if (currentStatus === null) return "create";
+  return currentStatus === "ACTIVE" ? "update" : "keep";
+}
 
 export const SEED_LISTINGS: SeedListing[] = [
   // TEXTBOOKS
