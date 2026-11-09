@@ -21,7 +21,9 @@ import { cleanup, createTestUser, prisma } from "./helpers/api.js";
 //
 // The rows are due around 1999, before every other test file's (2000 and later),
 // so the run without the filter can't reach another file's rows, and no real
-// row is due that early either.
+// row is due that early either. The reverse isn't true: another file's sweep
+// (at 2000 or later) would reach these rows, so vitest.config.ts runs this file
+// alone, after all the others.
 
 const NOW = new Date("1999-01-01T12:00:00.000Z");
 const MINUTE = 60 * 1000;

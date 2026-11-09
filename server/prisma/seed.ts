@@ -1,4 +1,4 @@
-// Dev seed: 5 verified test users and 20 listings across several categories
+// Dev seed: 5 verified test users and 21 listings across several categories
 // (prisma/seedListings.ts). Listing photos are client/public/images/<slug>.webp,
 // fetched once with scripts/fetchListingImages.ts.
 // Run: npm run seed -w server 
