@@ -25,7 +25,8 @@
     "risk:classify": "tsx scripts/risk-classify.ts",
     "risk:eval": "tsx scripts/risk-eval.ts",
     "dispute:agent": "tsx scripts/dispute-agent.ts",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "seed:demo": "tsx scripts/demo-seed.ts"
   },
   "keywords": [],
   "author": "",

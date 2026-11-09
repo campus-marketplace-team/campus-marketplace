@@ -280,3 +280,21 @@ describe("PayPal client", () => {
     expect(pp.calls).toHaveLength(0);
   });
 });
+
+describe("getCheckoutOrder", () => {
+  it("reads an order's status with a plain GET (no request id, nothing changes at PayPal)", async () => {
+    const pp = fakePayPal(() => json(200, { id: "PPORDER-1", status: "APPROVED", intent: "AUTHORIZE" }));
+    const client = createPayPalClient(config, { fetch: pp.fetch });
+
+    expect(await client.getCheckoutOrder({ paypalOrderId: "PPORDER-1" })).toEqual({ id: "PPORDER-1", status: "APPROVED" });
+    expect(pp.calls).toHaveLength(1);
+    expect(pp.calls[0]).toMatchObject({ method: "GET", url: "https://paypal.test/v2/checkout/orders/PPORDER-1" });
+    expect(pp.calls[0].headers["PayPal-Request-Id"]).toBeUndefined();
+  });
+
+  it("refuses a response without a status", async () => {
+    const pp = fakePayPal(() => json(200, { id: "PPORDER-1" }));
+    const client = createPayPalClient(config, { fetch: pp.fetch });
+    await expect(client.getCheckoutOrder({ paypalOrderId: "PPORDER-1" })).rejects.toBeInstanceOf(PayPalError);
+  });
+});

@@ -3,7 +3,7 @@
 //
 //   npx tsx server/scripts/fetchListingImages.ts
 //
-// For each listing in prisma/seedListings.ts it searches Pixabay for the
+// For each listing in prisma/seedListings.ts and prisma/demoData.ts it searches Pixabay for the
 // listing's photoSearch term (photos, horizontal, safe search) and picks a
 // product shot: it tries "<term> isolated" first (Pixabay's tag for cut-out
 // product photos), then the plain term, and takes the first result whose tags
@@ -26,6 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 import sharp from "sharp";
+import { DEMO_LISTINGS } from "../prisma/demoData.js";
 import { SEED_LISTINGS } from "../prisma/seedListings.js";
 
 const SERVER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -141,7 +142,8 @@ async function main() {
   let calledApi = false;
   const used = new Set<string>();
 
-  for (const listing of SEED_LISTINGS) {
+  // The demo listings (scripts/demo-seed.ts) need photos too.
+  for (const listing of [...SEED_LISTINGS, ...Object.values(DEMO_LISTINGS)]) {
     const file = `${listing.slug}.webp`;
     const target = join(IMAGES_DIR, file);
     const row: Row = { title: listing.title, file, search: listing.photoSearch, pixabay: "" };

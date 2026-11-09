@@ -574,6 +574,19 @@ export function createPayPalClient(
     /** GET /v2/payments/refunds/{id}: CANCELLED, FAILED, PENDING, COMPLETED. */
     getRefund: (input: { refundId: string }) => getPayment("refunds", input.refundId),
 
+    /**
+     * GET /v2/checkout/orders/{id}: CREATED, SAVED, APPROVED, VOIDED, COMPLETED,
+     * PAYER_ACTION_REQUIRED. Read-only, so it's safe to poll while waiting for the
+     * buyer to approve (unlike authorize, whose request id would replay the answer).
+     */
+    async getCheckoutOrder(input: { paypalOrderId: string }): Promise<{ id: string; status: string }> {
+      const json = await getJson("get-order", `/v2/checkout/orders/${encodeURIComponent(input.paypalOrderId)}`);
+      if (typeof json?.id !== "string" || typeof json?.status !== "string") {
+        throw new PayPalError("get-order", "invalid_response", "response had no id or status");
+      }
+      return { id: json.id, status: json.status };
+    },
+
     /** POST /v2/payments/authorizations/{id}/void. The buyer is never charged. */
     async voidAuthorization(input: { orderId: string; authorizationId: string; action?: PayPalAction }): Promise<{ status: string }> {
       const { status, json } = await call(
