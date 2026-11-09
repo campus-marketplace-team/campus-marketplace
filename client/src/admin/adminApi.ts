@@ -173,6 +173,8 @@ export type AdminDashboard = {
   openFlagCount: number
   deadLetters: DeadLetter[]
   deadLetterCount: number
+  /** Chaos buttons run only while the API uses the PayPal sandbox. */
+  chaosEnabled: boolean
 }
 
 export function fetchAdminDashboard(signal?: AbortSignal) {
@@ -187,6 +189,20 @@ export function approveDisputeDecision(id: string) {
 
 export function rejectDisputeDecision(id: string) {
   return api<DecisionResponse>(`/api/admin/dispute-decisions/${id}/reject`, { method: 'POST', body: {} })
+}
+
+/** Mirrors server/src/admin/chaos.ts. */
+export type ChaosScenario = 'duplicate-webhook' | 'capture-timeout' | 'expire-deadline'
+
+export type ChaosResult = {
+  scenario: ChaosScenario
+  orderId: string
+  steps: { label: string; detail: string }[]
+  order: { state: OrderState; version: number }
+}
+
+export function runChaos(scenario: ChaosScenario, orderId: string) {
+  return api<ChaosResult>(`/api/admin/chaos/${scenario}`, { method: 'POST', body: { orderId } })
 }
 
 export function resolveEscalatedDispute(orderId: string, body: { action: 'REFUND' | 'PARTIAL_REFUND' | 'RELEASE'; refundCents?: number; reasoning: string }) {

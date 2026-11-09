@@ -23,13 +23,14 @@ import { formatPrice } from '../../listings/format'
 import { ORDER_STATE_LABELS } from '../../orders/orderStatus'
 import { dateTime, defaultColDef, gridTheme, money, shortId, stateLabel } from './adminGrid'
 import { AiDecisions } from './AiDecisions'
+import { ChaosPanel } from './ChaosPanel'
 import { DisputeQueues } from './DisputeQueues'
 import './admin.css'
 
 // Admin dashboard: orders by state, money held / captured / paid out from the
 // ledger, reconciliation mismatches and dead-lettered outbox rows, and the AI
 // decision records (AiDecisions.tsx), all read-only, plus the dispute approval
-// gate (DisputeQueues.tsx).
+// gate (DisputeQueues.tsx) and, in the PayPal sandbox, chaos buttons (ChaosPanel.tsx).
 // Refreshes every 30 s. All cells render as plain text (no HTML), since
 // messages and payloads can contain anything.
 
@@ -157,6 +158,8 @@ function Dashboard({
           />
         </div>
       </section>
+
+      {data.chaosEnabled && <ChaosPanel orders={data.orders} onChanged={onChanged} />}
 
       <AiDecisions
         risk={data.riskDecisions}

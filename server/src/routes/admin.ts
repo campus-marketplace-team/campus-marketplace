@@ -1,4 +1,5 @@
 import { Router, type Response } from "express";
+import { chaosEnabled, isChaosScenario, runChaos } from "../admin/chaos.js";
 import { getAdminDashboard } from "../admin/dashboard.js";
 import { requireAdmin, requireAuth } from "../auth/middleware.js";
 import { approveDisputeDecision, rejectDisputeDecision, resolveEscalatedDispute } from "../disputes/actionTools.js";
@@ -35,10 +36,24 @@ export function createAdminRouter(getPayPal: () => PayPalClient) {
     await respond(res, () => run(paypal));
   }
 
-  // GET /api/admin/dashboard  ->  orders by state, ledger money totals, orders, reconciliation flags, dead letters, dispute decisions waiting, AI decision records
+  // GET /api/admin/dashboard  ->  orders by state, ledger money totals, orders, reconciliation flags, dead letters, dispute decisions waiting, AI decision records, chaosEnabled
   router.get("/dashboard", async (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.json(await getAdminDashboard());
+    res.json({ ...(await getAdminDashboard()), chaosEnabled: chaosEnabled() });
+  });
+
+  // POST /api/admin/chaos/:scenario  { orderId }  ->  { scenario, orderId, steps, order }. PayPal sandbox only (src/admin/chaos.ts).
+  router.post("/chaos/:scenario", (req, res) => {
+    if (!chaosEnabled()) {
+      res.status(403).json({ error: "Chaos buttons only run against the PayPal sandbox", code: "CHAOS_DISABLED" });
+      return;
+    }
+    const { scenario } = req.params;
+    if (!isChaosScenario(scenario)) {
+      res.status(404).json({ error: "Unknown chaos scenario", code: "NOT_FOUND" });
+      return;
+    }
+    return withPayPal(res, (paypal) => runChaos(paypal, scenario, req.body?.orderId));
   });
 
   // POST /api/admin/dispute-decisions/:id/approve  ->  { decision }, whose actionStatus says how it went

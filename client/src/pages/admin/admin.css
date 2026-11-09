@@ -220,3 +220,27 @@
   flex: 1 1 280px;
   gap: var(--space-1);
 }
+
+/* Chaos buttons (ChaosPanel.tsx) */
+.chaos {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chaos__scenarios {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chaos__steps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}

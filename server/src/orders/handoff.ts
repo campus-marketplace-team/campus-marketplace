@@ -94,7 +94,8 @@ export async function recordCapture(
   );
 }
 
-async function capture(
+/** Captures the order's authorization in full (request id `<orderId>-capture`). PayPal refusals become CheckoutErrors. */
+export async function capture(
   paypal: PayPalClient,
   order: { id: string; paypalAuthorizationId: string | null; amountCents: number; currency: string },
 ): Promise<Capture> {

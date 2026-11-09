@@ -25,6 +25,18 @@ export function getPayPalConfig(): PayPalConfig | null {
   return { clientId, clientSecret, baseUrl };
 }
 
+const SANDBOX_HOSTS = new Set(["api-m.sandbox.paypal.com", "api.sandbox.paypal.com"]);
+
+/** true only if `baseUrl` is PayPal's sandbox API. Admin chaos buttons (src/admin/chaos.ts) run only then. */
+export function isSandboxBaseUrl(baseUrl: string | null | undefined): boolean {
+  try {
+    const url = new URL(baseUrl ?? "");
+    return url.protocol === "https:" && SANDBOX_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Errors ----------
 
 export type PayPalErrorKind =

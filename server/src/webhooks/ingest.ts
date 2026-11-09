@@ -92,6 +92,18 @@ export async function ingestPayPalWebhook(
     return refuse(503, "Couldn't verify the event right now");
   }
 
+  const inserted = await storeWebhookEvent({ eventId, eventType, event });
+  return { status: 200, body: { received: true, duplicate: !inserted } };
+}
+
+/**
+ * Step 2 above, for an event that has already been verified: stores it and
+ * queues it for the worker, or does nothing if its event id is already stored.
+ * Returns true if this call stored it. Also used by the admin chaos buttons to
+ * redeliver a stored event (src/admin/chaos.ts).
+ */
+export async function storeWebhookEvent(input: { eventId: string; eventType: string; event: Record<string, unknown> }): Promise<boolean> {
+  const { eventId, eventType, event } = input;
   const resource = event.resource as Record<string, unknown> | undefined;
   const id = randomUUID();
   const inserted = await prisma.$transaction(async (tx) => {
@@ -116,7 +128,7 @@ export async function ingestPayPalWebhook(
   });
 
   if (!inserted) console.log(`webhook ${eventId} (${eventType}): duplicate delivery, ignored`);
-  return { status: 200, body: { received: true, duplicate: !inserted } };
+  return inserted;
 }
 
 /**

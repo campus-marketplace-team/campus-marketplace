@@ -178,7 +178,7 @@ Goal: every order gets a risk decision before payment, and complaints are resolv
 ## Phase 5 — Polish, demo and submission (Nov 8–12)
 Goal: a judge understands the project in 3 minutes and can try it themselves.
 
-- [ ] **5.1 Chaos buttons**
+- [x] **5.1 Chaos buttons** (server/src/admin/chaos.ts, POST /api/admin/chaos/:scenario, client/src/pages/admin/ChaosPanel.tsx; sandbox gate is PAYPAL_BASE_URL's host; no new env vars or migrations)
   > Read CLAUDE.md. Add admin "chaos" buttons in the dashboard to trigger failure scenarios live: duplicate webhook, capture timeout, expired deadline. Sandbox only. When done, tick task 5.1 in TASKS.md.
 
 - [ ] **5.2 UI polish**
