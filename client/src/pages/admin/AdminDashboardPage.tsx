@@ -17,7 +17,7 @@ import {
   fetchAdminDashboard,
   type ReconciliationFlag,
 } from '../../admin/adminApi'
-import { Alert, Button } from '../../components'
+import { Button, LoadError, LoadingState } from '../../components'
 import { Page } from '../../layout/Page'
 import { formatPrice } from '../../listings/format'
 import { ORDER_STATE_LABELS } from '../../orders/orderStatus'
@@ -71,12 +71,8 @@ export function AdminDashboardPage() {
         </Button>
       }
     >
-      {state.status === 'error' && <Alert tone="error">{state.message}</Alert>}
-      {state.status === 'loading' && (
-        <p className="page-status" role="status">
-          Loading…
-        </p>
-      )}
+      {state.status === 'error' && <LoadError message={state.message} onRetry={() => void load()} />}
+      {state.status === 'loading' && <LoadingState label="Loading the dashboard…" />}
       {data && <Dashboard data={data} stateFilter={stateFilter} onStateFilter={setStateFilter} onChanged={() => void load()} />}
     </Page>
   )

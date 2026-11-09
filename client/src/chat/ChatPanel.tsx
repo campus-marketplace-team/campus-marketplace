@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { CHAT_LIMITS } from '@campus/shared'
 import { ApiError } from '../api/client'
-import { Alert, Button, Card } from '../components'
+import { Alert, Button, Card, LoadingState } from '../components'
 import type { Listing } from '../listings/listingsApi'
 import { fetchMessages, fetchThreads, sendMessage, type ChatMessage, type ChatThread } from './chatApi'
 import { usePoll } from './usePoll'
@@ -59,7 +59,7 @@ function SellerChats({ listing, meId }: { listing: Listing; meId: string }) {
     <Card title="Messages from buyers">
       <div className="stack">
         {error && <Alert tone="error">{error}</Alert>}
-        {threads === null && !error && <p className="text-muted">Loading messages…</p>}
+        {threads === null && !error && <LoadingState inline label="Loading messages…" />}
         {threads?.length === 0 && <p className="text-muted">No messages yet. Buyers' questions will show up here.</p>}
         {threads && threads.length > 1 && (
           <div className="chat-buyers" role="tablist" aria-label="Conversations">
@@ -173,7 +173,8 @@ function Conversation({ listingId, buyerId, meId, otherName, canStart }: Convers
   }
 
   if (messages === null) {
-    return loadError ? <Alert tone="error">{loadError}</Alert> : <p className="text-muted">Loading messages…</p>
+    // The poll keeps retrying, so there's no button here.
+    return loadError ? <Alert tone="error">{loadError} Retrying…</Alert> : <LoadingState inline label="Loading messages…" />
   }
 
   const canSend = messages.length > 0 || canStart

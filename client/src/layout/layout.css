@@ -105,6 +105,35 @@
   flex: 1;
 }
 
+/* Thin bar across the top while a lazy page downloads. */
+.app-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  width: 100%;
+  height: 3px;
+  background: var(--color-primary);
+  transform-origin: left;
+  animation: app-progress 1.2s ease-out infinite;
+}
+
+@keyframes app-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-progress {
+    animation: none;
+  }
+}
+
 .page-status {
   padding: var(--space-7) var(--space-4);
   text-align: center;

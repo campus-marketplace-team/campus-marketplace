@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import type { CheckoutOrder } from '../../checkout/checkoutApi'
-import { Alert, Button, ButtonLink, Card, Textarea } from '../../components'
+import { Alert, Button, ButtonLink, LoadingState, Textarea } from '../../components'
 import { scanHandoffToken } from '../../handoff/handoffApi'
 import { useQrScanner } from '../../handoff/useQrScanner'
 import { Page } from '../../layout/Page'
@@ -11,6 +11,11 @@ import './handoff.css'
 // Buyer's side of the handoff: scan the seller's QR code to release the
 // payment. The server checks the code and that this logged-in buyer owns the
 // order, then captures. Pasting the code is a fallback for devices without a camera.
+//
+// Built for a phone held up to another phone: on small screens the camera view
+// runs edge to edge, the viewport keeps its place while a code is checked (so
+// the page doesn't jump), and the paste fallback stays folded away unless the
+// camera can't be used.
 
 type State =
   | { status: 'scanning' }
@@ -35,58 +40,95 @@ export function ScanPage() {
   }, [])
 
   const camera = useQrScanner(video, state.status === 'scanning', submit)
+  const cameraFailed = camera === 'denied' || camera === 'unavailable'
 
   function onPaste(e: FormEvent) {
     e.preventDefault()
     if (pasted.trim()) void submit(pasted)
   }
 
+  if (state.status === 'done') {
+    return (
+      <Page title="Payment complete" width="narrow">
+        <div className="scan">
+          <div className="scan__done" role="status">
+            <span className="scan__done-icon" aria-hidden="true">
+              ✓
+            </span>
+            <p className="scan__done-amount">{formatPrice(state.order.amountCents, state.order.currency)}</p>
+            <p className="text-muted">released to the seller. Enjoy!</p>
+          </div>
+          <ButtonLink to={`/orders/${state.order.id}`} fullWidth>
+            View order
+          </ButtonLink>
+        </div>
+      </Page>
+    )
+  }
+
   return (
-    <Page title="Scan handoff code" description="Scan the seller's QR code when you get the item." width="narrow">
-      <Card>
-        <div className="stack">
-          {state.status === 'done' && (
-            <>
-              <Alert tone="success">
-                Payment complete: {formatPrice(state.order.amountCents, state.order.currency)} released to the seller. Enjoy!
-              </Alert>
-              <ButtonLink to={`/orders/${state.order.id}`}>View order</ButtonLink>
-            </>
+    <Page title="Scan handoff code" description="Scan the seller's QR code once you have the item." width="narrow">
+      <div className="scan">
+        {/* Always mounted, since the camera needs the video element; the same size while scanning, checking or after an error. */}
+        <div className="scan__viewport" hidden={cameraFailed}>
+          <video ref={video} className="scan__video" muted playsInline />
+          {state.status === 'scanning' && camera === 'scanning' && <span className="scan__frame" aria-hidden="true" />}
+          {state.status === 'scanning' && camera === 'starting' && <p className="scan__overlay">Starting camera…</p>}
+          {state.status === 'submitting' && (
+            <p className="scan__overlay" role="status">
+              <span className="scan__spinner" aria-hidden="true" />
+              Checking the code…
+            </p>
           )}
           {state.status === 'error' && (
-            <>
-              <Alert tone="error">{state.message}</Alert>
-              <Button onClick={() => setState({ status: 'scanning' })}>Scan again</Button>
-            </>
+            <p className="scan__overlay" aria-hidden="true">
+              Code not accepted
+            </p>
           )}
-          {state.status === 'submitting' && <p className="text-muted">Checking the code…</p>}
+        </div>
 
-          <div className="scan__viewport" hidden={state.status !== 'scanning'}>
-            <video ref={video} className="scan__video" muted playsInline />
-            {camera === 'starting' && <p className="scan__overlay">Starting camera…</p>}
-            {camera === 'denied' && (
-              <p className="scan__overlay">Camera access was blocked. Allow it in your browser settings, or paste the code below.</p>
-            )}
-            {camera === 'unavailable' && <p className="scan__overlay">No camera available. Paste the code below.</p>}
-          </div>
+        {cameraFailed && state.status === 'submitting' && <LoadingState inline label="Checking the code…" />}
+        {state.status === 'scanning' && camera === 'scanning' && (
+          <p className="scan__hint" role="status">
+            Point your camera at the seller's code. It scans by itself.
+          </p>
+        )}
+        {state.status === 'scanning' && camera === 'denied' && (
+          <Alert tone="error">Camera access was blocked. Allow it in your browser settings and reload, or paste the code below.</Alert>
+        )}
+        {state.status === 'scanning' && camera === 'unavailable' && <Alert>No camera available here. Paste the code below.</Alert>}
 
-          {state.status === 'scanning' && (
+        {state.status === 'error' && (
+          <>
+            <Alert tone="error">{state.message}</Alert>
+            <Button fullWidth onClick={() => setState({ status: 'scanning' })}>
+              Scan again
+            </Button>
+          </>
+        )}
+
+        {state.status === 'scanning' && (
+          // Remounted when the camera fails so it opens; otherwise it starts folded away.
+          <details key={cameraFailed ? 'open' : 'closed'} className="scan__paste" open={cameraFailed}>
+            <summary>Can't scan? Paste the code instead</summary>
             <form className="stack" onSubmit={onPaste}>
               <Textarea
-                label="Or paste the code"
+                label="Handoff code"
+                hint="The seller can copy it from their QR code page."
                 rows={3}
                 value={pasted}
                 onChange={(e) => setPasted(e.target.value)}
                 spellCheck={false}
                 autoComplete="off"
+                autoCapitalize="off"
               />
-              <Button type="submit" variant="secondary" disabled={!pasted.trim()}>
+              <Button type="submit" variant="secondary" fullWidth disabled={!pasted.trim()}>
                 Submit code
               </Button>
             </form>
-          )}
-        </div>
-      </Card>
+          </details>
+        )}
+      </div>
     </Page>
   )
 }

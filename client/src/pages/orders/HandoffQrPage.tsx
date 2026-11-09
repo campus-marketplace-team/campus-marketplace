@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import { ApiError } from '../../api/client'
-import { Alert, Button, ButtonLink, Card, Textarea } from '../../components'
+import { Alert, Button, ButtonLink, Card, LoadError, LoadingState, Textarea } from '../../components'
 import { fetchHandoffToken } from '../../handoff/handoffApi'
 import { Page } from '../../layout/Page'
 import './handoff.css'
@@ -97,12 +97,13 @@ export function HandoffQrPage() {
     <Page title="Handoff QR code" description="Show this to the buyer when you hand over the item." width="narrow">
       <Card>
         <div className="stack handoff">
-          {state.status === 'loading' && <p className="text-muted">Getting a code…</p>}
+          {state.status === 'loading' && <LoadingState label="Getting a code…" />}
           {state.status === 'error' && (
-            <>
-              <Alert tone="error">{state.message}</Alert>
-              <Button onClick={() => void load()}>Try again</Button>
-            </>
+            <LoadError message={state.message} onRetry={() => void load()}>
+              <ButtonLink to={`/orders/${orderId}`} variant="ghost" size="sm">
+                Back to the order
+              </ButtonLink>
+            </LoadError>
           )}
           {state.status === 'closed' && (
             <>

@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation } from 'react-router'
+import { LoadingState } from '../components'
 import { safeRedirect, type RedirectState } from './redirect'
 import { useAuth } from './useAuth'
 
@@ -7,13 +8,7 @@ export function RequireAuth() {
   const { status } = useAuth()
   const location = useLocation()
 
-  if (status === 'loading') {
-    return (
-      <p className="page-status" role="status">
-        Loading…
-      </p>
-    )
-  }
+  if (status === 'loading') return <LoadingState />
   if (status === 'anonymous') {
     const from = location.pathname + location.search + location.hash
     return <Navigate to="/login" replace state={{ from } satisfies RedirectState} />
@@ -46,7 +41,7 @@ export function RedirectIfAuthenticated() {
   const location = useLocation()
   const from = (location.state as RedirectState | null)?.from
 
-  if (status === 'loading') return null
+  if (status === 'loading') return <LoadingState />
   if (status === 'authenticated') return <Navigate to={safeRedirect(from)} replace />
   return <Outlet />
 }

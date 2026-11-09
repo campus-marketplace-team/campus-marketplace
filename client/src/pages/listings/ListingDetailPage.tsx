@@ -5,7 +5,7 @@ import { useAuth } from '../../auth/useAuth'
 import { ChatPanel } from '../../chat/ChatPanel'
 import type { CheckoutOrder } from '../../checkout/checkoutApi'
 import { PayPalCheckout } from '../../checkout/PayPalCheckout'
-import { Alert, ButtonLink, Card } from '../../components'
+import { Alert, ButtonLink, Card, LoadError, LoadingState } from '../../components'
 import { Page } from '../../layout/Page'
 import { CATEGORY_LABELS, formatPrice } from '../../listings/format'
 import { fetchListing, type Listing } from '../../listings/listingsApi'
@@ -26,6 +26,8 @@ export function ListingDetailPage() {
   // Tagged with the listing it was loaded for, so moving to another listing shows as loading.
   const [result, setResult] = useState<(Result & { id: string }) | null>(null)
   const state = result?.id === listingId ? result : ({ status: 'loading' } as const)
+  // Bumped by "Try again" to re-run the fetch.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -40,20 +42,30 @@ export function ListingDetailPage() {
         }
       })
     return () => controller.abort()
-  }, [listingId])
+  }, [listingId, attempt])
 
   if (state.status === 'not-found') return <NotFoundPage />
   if (state.status === 'loading') {
     return (
       <Page title="Listing">
-        <p className="page-status">Loading listing…</p>
+        <LoadingState label="Loading listing…" />
       </Page>
     )
   }
   if (state.status === 'error') {
     return (
       <Page title="Listing">
-        <Alert tone="error">{state.message}</Alert>
+        <LoadError
+          message={state.message}
+          onRetry={() => {
+            setResult(null)
+            setAttempt((n) => n + 1)
+          }}
+        >
+          <ButtonLink to="/" variant="ghost" size="sm">
+            Back to browse
+          </ButtonLink>
+        </LoadError>
       </Page>
     )
   }

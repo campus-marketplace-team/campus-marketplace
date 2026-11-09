@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useNavigate } from 'react-router'
+import { Link, NavLink, Outlet, useNavigate, useNavigation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { Button, ButtonLink } from '../components'
 import './layout.css'
@@ -12,6 +12,7 @@ const navItems = [
 /** Shell shared by every page: header + nav on top, routed page below. */
 export function AppLayout() {
   const auth = useAuth()
+  const navigation = useNavigation()
   const items =
     auth.status === 'authenticated' && auth.user.isAdmin ? [...navItems, { to: '/admin', label: 'Admin' }] : navItems
   return (
@@ -39,6 +40,8 @@ export function AppLayout() {
           <HeaderAuth />
         </div>
       </header>
+      {/* While a lazy page (the admin dashboard) downloads after a click, the old page stays up. */}
+      {navigation.state === 'loading' && <div className="app-progress" role="progressbar" aria-label="Loading page" />}
       <main className="app-main">
         <Outlet />
       </main>

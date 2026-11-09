@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import type { ListingStatus } from '@campus/shared'
 import { ApiError } from '../../api/client'
-import { Alert, ButtonLink, Card } from '../../components'
+import { ButtonLink, Card, LoadError, LoadingState } from '../../components'
 import { Page } from '../../layout/Page'
 import { CATEGORY_LABELS, formatPrice } from '../../listings/format'
 import { fetchMyListings, type Listing } from '../../listings/listingsApi'
@@ -33,6 +33,7 @@ type OrdersState = { status: 'loading' } | { status: 'error'; message: string } 
 
 function MyOrders() {
   const [state, setState] = useState<OrdersState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -43,12 +44,17 @@ function MyOrders() {
         setState({ status: 'error', message: err instanceof ApiError ? err.message : 'Could not load your orders.' })
       })
     return () => controller.abort()
-  }, [])
+  }, [attempt])
+
+  function retry() {
+    setState({ status: 'loading' })
+    setAttempt((n) => n + 1)
+  }
 
   return (
     <Card title="My orders">
-      {state.status === 'loading' && <p className="text-muted">Loading your orders…</p>}
-      {state.status === 'error' && <Alert tone="error">{state.message}</Alert>}
+      {state.status === 'loading' && <LoadingState inline label="Loading your orders…" />}
+      {state.status === 'error' && <LoadError message={state.message} onRetry={retry} />}
       {state.status === 'ready' && state.orders.length === 0 && (
         <p className="text-muted">No orders yet. Things you buy or sell will show up here.</p>
       )}
@@ -82,6 +88,7 @@ function MyOrders() {
 
 function MyListings() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -92,12 +99,17 @@ function MyListings() {
         setState({ status: 'error', message: err instanceof ApiError ? err.message : 'Could not load your listings.' })
       })
     return () => controller.abort()
-  }, [])
+  }, [attempt])
+
+  function retry() {
+    setState({ status: 'loading' })
+    setAttempt((n) => n + 1)
+  }
 
   return (
     <Card title="My listings">
-      {state.status === 'loading' && <p className="text-muted">Loading your listings…</p>}
-      {state.status === 'error' && <Alert tone="error">{state.message}</Alert>}
+      {state.status === 'loading' && <LoadingState inline label="Loading your listings…" />}
+      {state.status === 'error' && <LoadError message={state.message} onRetry={retry} />}
       {state.status === 'ready' && state.listings.length === 0 && (
         <p className="text-muted">
           You haven't posted anything yet. <Link to="/sell">Post your first listing</Link>.

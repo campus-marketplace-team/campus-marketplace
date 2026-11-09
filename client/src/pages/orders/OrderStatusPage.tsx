@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { Link, useLocation, useParams } from 'react-router'
 import { DISPUTE_LIMITS, isTerminalState, LISTING_LIMITS } from '@campus/shared'
 import { ApiError } from '../../api/client'
-import { Alert, Button, ButtonLink, Card } from '../../components'
+import { Alert, Button, ButtonLink, Card, LoadError, LoadingState } from '../../components'
 import { usePoll } from '../../chat/usePoll'
 import { Page } from '../../layout/Page'
 import { formatPrice } from '../../listings/format'
@@ -30,15 +30,17 @@ type LoadState = { status: 'loading' } | { status: 'error'; message: string } | 
 
 export function OrderStatusPage() {
   const { orderId = '' } = useParams()
+  // Bumped by "Try again", which remounts the loader.
+  const [attempt, setAttempt] = useState(0)
   return (
     <Page title="Order status" width="narrow">
-      {/* Keyed so a different order starts fresh (state and polling). */}
-      <OrderLoader key={orderId} orderId={orderId} />
+      {/* Keyed so a different order (or a retry) starts fresh (state and polling). */}
+      <OrderLoader key={`${orderId}-${attempt}`} orderId={orderId} onRetry={() => setAttempt((n) => n + 1)} />
     </Page>
   )
 }
 
-function OrderLoader({ orderId }: { orderId: string }) {
+function OrderLoader({ orderId, onRetry }: { orderId: string; onRetry: () => void }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
 
   // Nothing changes once an order can't move anymore, so polling stops there.
@@ -64,15 +66,14 @@ function OrderLoader({ orderId }: { orderId: string }) {
   )
   usePoll(load, POLL_MS)
 
-  if (state.status === 'loading') return <p className="text-muted">Loading the order…</p>
+  if (state.status === 'loading') return <LoadingState label="Loading the order…" />
   if (state.status === 'error') {
     return (
-      <div className="stack">
-        <Alert tone="error">{state.message}</Alert>
-        <ButtonLink to="/me" variant="secondary">
+      <LoadError message={state.message} onRetry={onRetry}>
+        <ButtonLink to="/me" variant="ghost" size="sm">
           Back to my stuff
         </ButtonLink>
-      </div>
+      </LoadError>
     )
   }
   return (

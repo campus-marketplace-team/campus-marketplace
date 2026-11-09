@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { isListingCategory, LISTING_CATEGORIES, type ListingCategory } from '@campus/shared'
 import { ApiError } from '../../api/client'
-import { Alert, Button, ButtonLink, Card, Input } from '../../components'
+import { Alert, Button, ButtonLink, Card, Input, LoadError, LoadingState } from '../../components'
 import { Page } from '../../layout/Page'
 import { CATEGORY_LABELS, centsToDollarInput, formatPrice, parseDollarsToCents } from '../../listings/format'
 import { fetchListings, type Listing, type ListingFilters } from '../../listings/listingsApi'
@@ -39,6 +39,8 @@ export function BrowsePage() {
   const [result, setResult] = useState<(Result & { key: string }) | null>(null)
   const state = result?.key === paramsKey ? result : ({ status: 'loading' } as const)
   const [loadingMore, setLoadingMore] = useState(false)
+  // Bumped by "Try again" to re-run the fetch for the same filters.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -50,7 +52,7 @@ export function BrowsePage() {
         setResult({ key: paramsKey, status: 'error', message })
       })
     return () => controller.abort()
-  }, [filters, paramsKey])
+  }, [filters, paramsKey, attempt])
 
   async function loadMore() {
     if (state.status !== 'ready' || !state.nextCursor) return
@@ -140,8 +142,16 @@ export function BrowsePage() {
         </aside>
 
         <section className="browse__results" aria-live="polite" aria-busy={state.status === 'loading'}>
-          {state.status === 'loading' && <p className="page-status">Loading listings…</p>}
-          {state.status === 'error' && <Alert tone="error">{state.message}</Alert>}
+          {state.status === 'loading' && <LoadingState label="Loading listings…" />}
+          {state.status === 'error' && (
+            <LoadError
+              message={state.message}
+              onRetry={() => {
+                setResult(null)
+                setAttempt((n) => n + 1)
+              }}
+            />
+          )}
           {state.status === 'ready' && state.listings.length === 0 && (
             <Card>
               <p className="text-muted">

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'r
 import { Link, useNavigate, useParams } from 'react-router'
 import { DISPUTE_LIMITS, DISPUTE_REASONS, isDisputeReason, LISTING_LIMITS } from '@campus/shared'
 import { ApiError } from '../../api/client'
-import { Alert, Button, ButtonLink, Card, Select, Textarea } from '../../components'
+import { Alert, Button, ButtonLink, Card, LoadError, LoadingState, Select, Textarea } from '../../components'
 import { Page } from '../../layout/Page'
 import { DISPUTE_REASON_LABELS, disputePhotoProblem } from '../../orders/orderStatus'
 import { fetchOrder, openDispute, uploadDisputePhoto, type OrderStatus } from '../../orders/ordersApi'
@@ -26,6 +26,7 @@ const maxPhotoMb = LISTING_LIMITS.photoMaxBytes / (1024 * 1024)
 export function ReportProblemPage() {
   const { orderId = '' } = useParams()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -36,12 +37,24 @@ export function ReportProblemPage() {
         setState({ status: 'error', message: err instanceof ApiError ? err.message : 'Could not load this order.' })
       })
     return () => controller.abort()
-  }, [orderId])
+  }, [orderId, attempt])
 
   return (
     <Page title="Report a problem" description="Your payment stays on hold while we look into it." width="narrow">
-      {state.status === 'loading' && <p className="text-muted">Loading the order…</p>}
-      {state.status === 'error' && <Alert tone="error">{state.message}</Alert>}
+      {state.status === 'loading' && <LoadingState label="Loading the order…" />}
+      {state.status === 'error' && (
+        <LoadError
+          message={state.message}
+          onRetry={() => {
+            setState({ status: 'loading' })
+            setAttempt((n) => n + 1)
+          }}
+        >
+          <ButtonLink to={`/orders/${orderId}`} variant="ghost" size="sm">
+            Back to the order
+          </ButtonLink>
+        </LoadError>
+      )}
       {state.status === 'ready' &&
         (state.order.role === 'buyer' && state.order.state === 'AUTHORIZED' ? (
           <ReportForm order={state.order} />

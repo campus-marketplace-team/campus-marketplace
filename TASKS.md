@@ -181,8 +181,9 @@ Goal: a judge understands the project in 3 minutes and can try it themselves.
 - [x] **5.1 Chaos buttons** (server/src/admin/chaos.ts, POST /api/admin/chaos/:scenario, client/src/pages/admin/ChaosPanel.tsx; sandbox gate is PAYPAL_BASE_URL's host; no new env vars or migrations)
   > Read CLAUDE.md. Add admin "chaos" buttons in the dashboard to trigger failure scenarios live: duplicate webhook, capture timeout, expired deadline. Sandbox only. When done, tick task 5.1 in TASKS.md.
 
-- [ ] **5.2 UI polish**
+- [x] **5.2 UI polish** (client/src/components/Status.tsx LoadingState + LoadError with retry on every page, client/src/pages/RouteErrorPage.tsx as the router's error page, mobile scanner in client/src/pages/orders/ScanPage.tsx + handoff.css; no env vars or migrations)
   > Read CLAUDE.md. Do a UI polish pass in client/: loading and error states on every page, and a mobile-friendly layout for the QR scanner page. When done, tick task 5.2 in TASKS.md.
+  
 
 - [ ] **5.3 Demo seed data**
   > Read CLAUDE.md. Write a demo seed script with one normal completed sale, one blocked scam listing, and one open dispute. When done, tick task 5.3 in TASKS.md.
