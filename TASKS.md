@@ -185,7 +185,7 @@ Goal: a judge understands the project in 3 minutes and can try it themselves.
   > Read CLAUDE.md. Do a UI polish pass in client/: loading and error states on every page, and a mobile-friendly layout for the QR scanner page. When done, tick task 5.2 in TASKS.md.
   
 
-- [ ] **5.3 Demo seed data**
+- [x] **5.3 Demo seed data**
   > Read CLAUDE.md. Write a demo seed script with one normal completed sale, one blocked scam listing, and one open dispute. When done, tick task 5.3 in TASKS.md.
 
 - [x] **5.4 Architecture diagram + payment tradeoff** (docs/ARCHITECTURE.md: Mermaid system diagram, sale flow, reliability table, authorize-then-capture vs capture-and-hold with the regulatory note and the post-capture payout window as a known limitation. Docs only; no env vars or migrations.)
