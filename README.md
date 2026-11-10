@@ -241,8 +241,8 @@ docs/     Architecture diagram and payment-model tradeoff
 
 ## Team
 
-- Hassan
-- Abubakr
+- Hassan Akhtar
+- Abubakr Hemed
 
 ## Credits
 
