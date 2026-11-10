@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DISPUTE_LIMITS } from "@campus/shared";
 import { voidOverdueOrder } from "../src/jobs/handoffDeadline.js";
@@ -18,7 +19,8 @@ vi.mock("../src/storage.js", async (importOriginal) => ({
   deleteObject: vi.fn(async () => {}),
 }));
 
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+// A real image: uploads are decoded and re-encoded with sharp (src/images.ts).
+const PNG = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 200, g: 0, b: 0 } } }).png().toBuffer();
 const HOUR = 60 * 60 * 1000;
 const report = { reason: "NOT_AS_DESCRIBED", description: "The screen is cracked, unlike the photos." };
 
@@ -216,7 +218,8 @@ describe("POST /api/orders/:id/dispute/photos", () => {
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
     expect(second.body.dispute.photoUrls).toHaveLength(2);
-    expect(second.body.dispute.photoUrls[0]).toMatch(new RegExp(`/disputes/${order.id}/[0-9a-f-]+\\.png$`));
+    expect(second.body.dispute.photoUrls[0]).toMatch(new RegExp(`/disputes/${order.id}/[0-9a-f-]+\\.webp$`));
+    expect(vi.mocked(uploadObject).mock.calls[0][3]).toBe("image/webp");
 
     const row = await prisma.dispute.findUniqueOrThrow({ where: { orderId: order.id } });
     expect(row.photoUrls).toEqual(second.body.dispute.photoUrls);
@@ -238,6 +241,15 @@ describe("POST /api/orders/:id/dispute/photos", () => {
     const order = await openedDispute();
     const res = await uploadPhoto(order.id, { body: Buffer.from("<script>alert(1)</script>"), type: "image/png" });
     expect(res.status).toBe(415);
+    expect(uploadObject).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file with an image signature that doesn't decode", async () => {
+    const order = await openedDispute();
+    const fake = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const res = await uploadPhoto(order.id, { body: fake });
+    expect(res.status).toBe(415);
+    expect(res.body.code).toBe("NOT_AN_IMAGE");
     expect(uploadObject).not.toHaveBeenCalled();
   });
 

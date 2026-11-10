@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import { DISPUTE_PHOTO_GRACE_MS, enqueueDisputeDecision } from "../outbox/handlers.js";
 import { deleteObject, getStorageConfig, sniffImage, uploadObject } from "../storage.js";
+import { InvalidImageError, processPhoto, type ProcessedPhoto } from "../images.js";
 import { CheckoutError, getOrderView } from "./checkout.js";
 import { StaleOrderError, transition } from "./stateMachine.js";
 
@@ -116,10 +117,18 @@ export async function addDisputePhoto(userId: string, orderId: unknown, body: un
   const storage = getStorageConfig();
   if (!storage) throw new CheckoutError(503, "STORAGE_NOT_CONFIGURED", "Photo uploads aren't configured on this server");
 
-  const path = `disputes/${disputedOrderId}/${randomUUID()}.${image.ext}`;
+  let photo: ProcessedPhoto;
+  try {
+    photo = await processPhoto(body);
+  } catch (err) {
+    if (err instanceof InvalidImageError) throw new CheckoutError(415, "NOT_AN_IMAGE", err.message);
+    throw err;
+  }
+
+  const path = `disputes/${disputedOrderId}/${randomUUID()}.${photo.ext}`;
   let url: string;
   try {
-    url = await uploadObject(storage, path, body, image.type);
+    url = await uploadObject(storage, path, photo.data, photo.type);
   } catch (err) {
     console.error(err);
     throw new CheckoutError(502, "UPLOAD_FAILED", "Couldn't upload the photo. Try again");

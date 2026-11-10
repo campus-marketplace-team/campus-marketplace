@@ -129,14 +129,23 @@
   transform: translateY(-2px);
 }
 
+/* Every card's photo is the same 4:3 box, whatever the photo's shape. The img is
+   taken out of flow so its own size can never stretch the box, and the box
+   reserves its space before the image loads. */
 .listing-card__photo {
+  position: relative;
+  flex: none;
   aspect-ratio: 4 / 3;
   display: grid;
   place-items: center;
+  overflow: hidden;
   background: var(--color-surface-muted);
 }
 
 .listing-card__photo img {
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -204,7 +213,10 @@
   gap: var(--space-3);
 }
 
+/* Same 4:3 box as the cards, but the whole photo is always shown (contain),
+   centred, with the neutral background filling the rest. */
 .listing-detail__photo {
+  position: relative;
   aspect-ratio: 4 / 3;
   display: grid;
   place-items: center;
@@ -215,9 +227,13 @@
 }
 
 .listing-detail__photo img {
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
 }
 
 .listing-detail__thumbs {

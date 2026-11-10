@@ -16,19 +16,24 @@
   color: var(--color-primary);
 }
 
+/* 4:3 like the listing photos; the whole photo shows (contain) on a neutral background. */
 .order-status__photo {
+  position: relative;
   flex: none;
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
   background: var(--color-surface-muted);
   border-radius: var(--radius-sm);
 }
 
 .order-status__photo img {
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .order-status__info {
@@ -158,18 +163,23 @@
   list-style: none;
 }
 
+/* Report photos are evidence: show all of each one (contain) in a 4:3 box. */
 .order-report__photos a {
+  position: relative;
   display: block;
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
   background: var(--color-surface-muted);
   border-radius: var(--radius-sm);
 }
 
 .order-report__photos img {
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .order-money {

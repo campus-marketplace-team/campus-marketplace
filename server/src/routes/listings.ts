@@ -6,6 +6,7 @@ import { prisma } from "../db.js";
 import { requireAuth } from "../auth/middleware.js";
 import { isUuid } from "../ids.js";
 import { deleteObject, getStorageConfig, pathFromPublicUrl, sniffImage, uploadObject } from "../storage.js";
+import { InvalidImageError, processPhoto, type ProcessedPhoto } from "../images.js";
 
 export const listingsRouter = Router();
 
@@ -252,7 +253,8 @@ const rawImage = express.raw({ type: [...LISTING_LIMITS.photoTypes], limit: LIST
 
 // POST /api/listings/:id/photos  (seller only)
 // Body: the raw image bytes, one photo per request, with Content-Type image/jpeg,
-// image/png or image/webp (max 5 MB, 6 photos per listing).
+// image/png or image/webp (max 5 MB, 6 photos per listing). Stored as WebP,
+// rotated upright, metadata stripped, longest side at most 1600 px (see images.ts).
 // From the browser: fetch(url, { method: "POST", headers: { Authorization }, body: file })
 listingsRouter.post("/:id/photos", requireAuth, rawImage, async (req, res) => {
   const listing = await findOwnListing(req, res);
@@ -283,10 +285,19 @@ listingsRouter.post("/:id/photos", requireAuth, rawImage, async (req, res) => {
     return;
   }
 
-  const path = `listings/${listing.id}/${randomUUID()}.${image.ext}`;
+  let photo: ProcessedPhoto;
+  try {
+    photo = await processPhoto(body);
+  } catch (err) {
+    if (!(err instanceof InvalidImageError)) throw err;
+    res.status(415).json({ error: err.message });
+    return;
+  }
+
+  const path = `listings/${listing.id}/${randomUUID()}.${photo.ext}`;
   let url: string;
   try {
-    url = await uploadObject(storage, path, body, image.type);
+    url = await uploadObject(storage, path, photo.data, photo.type);
   } catch (err) {
     console.error(err);
     res.status(502).json({ error: "Couldn't upload the photo. Try again" });
