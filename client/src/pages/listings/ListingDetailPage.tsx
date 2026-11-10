@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useAuth } from '../../auth/useAuth'
 import { ChatPanel } from '../../chat/ChatPanel'
@@ -83,6 +83,14 @@ function ListingDetail({ listing: loaded, notice }: { listing: Listing; notice: 
   const photos = listing.photoUrls ?? []
   const [photoIndex, setPhotoIndex] = useState(0)
   const posted = new Date(listing.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })
+  // Links from the Messages inbox: /listings/:id?buyer=<buyerId>#chat (buyer only for the seller).
+  const [searchParams] = useSearchParams()
+  const initialBuyerId = searchParams.get('buyer')
+  const { hash } = useLocation()
+  useEffect(() => {
+    // On narrow screens the chat sits below the listing, so bring it into view.
+    if (hash === '#chat') document.getElementById('chat')?.scrollIntoView({ block: 'start' })
+  }, [hash])
 
   return (
     <Page title={listing.title}>
@@ -179,7 +187,14 @@ function ListingDetail({ listing: loaded, notice }: { listing: Listing; notice: 
             <PayPalCheckout listing={listing} onAuthorized={setOrder} chatVersion={latestMessageId} />
           )}
           {auth.status === 'authenticated' && (
-            <ChatPanel listing={listing} meId={auth.user.id} onLatestMessage={setLatestMessageId} />
+            <div id="chat" className="listing-detail__chat">
+              <ChatPanel
+                listing={listing}
+                meId={auth.user.id}
+                onLatestMessage={setLatestMessageId}
+                initialBuyerId={initialBuyerId}
+              />
+            </div>
           )}
         </div>
       </div>

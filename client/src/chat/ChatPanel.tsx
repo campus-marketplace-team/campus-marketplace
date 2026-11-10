@@ -3,8 +3,9 @@ import { CHAT_LIMITS } from '@campus/shared'
 import { ApiError } from '../api/client'
 import { Alert, Button, Card, LoadingState } from '../components'
 import type { Listing } from '../listings/listingsApi'
-import { fetchMessages, fetchThreads, sendMessage, type ChatMessage, type ChatThread } from './chatApi'
+import { fetchMessages, fetchThreads, markConversationRead, sendMessage, type ChatMessage, type ChatThread } from './chatApi'
 import { usePoll } from './usePoll'
+import { useUnread } from './useUnread'
 import '../components/Input.css'
 import './chat.css'
 
@@ -20,14 +21,17 @@ export function ChatPanel({
   listing,
   meId,
   onLatestMessage,
+  initialBuyerId,
 }: {
   listing: Listing
   meId: string
   /** Buyer side only: called with the newest message's id whenever it changes. */
   onLatestMessage?: (id: string | null) => void
+  /** Seller side only: which buyer's conversation to open first (e.g. from the Messages inbox). */
+  initialBuyerId?: string | null
 }) {
   return listing.seller.id === meId ? (
-    <SellerChats listing={listing} meId={meId} />
+    <SellerChats listing={listing} meId={meId} initialBuyerId={initialBuyerId ?? null} />
   ) : (
     <Card title={`Message ${listing.seller.displayName}`}>
       <Conversation
@@ -41,10 +45,10 @@ export function ChatPanel({
   )
 }
 
-function SellerChats({ listing, meId }: { listing: Listing; meId: string }) {
+function SellerChats({ listing, meId, initialBuyerId }: { listing: Listing; meId: string; initialBuyerId: string | null }) {
   const [threads, setThreads] = useState<ChatThread[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selectedBuyerId, setSelectedBuyerId] = useState<string | null>(null)
+  const [selectedBuyerId, setSelectedBuyerId] = useState<string | null>(initialBuyerId)
 
   usePoll(
     useCallback(
@@ -83,6 +87,12 @@ function SellerChats({ listing, meId }: { listing: Listing; meId: string }) {
                 onClick={() => setSelectedBuyerId(t.buyerId)}
               >
                 {t.otherUser.displayName}
+                {t.unread && t.buyerId !== selected?.buyerId && (
+                  <>
+                    <span className="unread-dot" aria-hidden="true" />
+                    <span className="visually-hidden"> (unread)</span>
+                  </>
+                )}
               </button>
             ))}
           </div>
@@ -160,6 +170,19 @@ function Conversation({ listingId, buyerId, meId, otherName, canStart, onLatestM
   useEffect(() => {
     if (loaded) onLatestRef.current?.(latestId)
   }, [latestId, loaded])
+
+  // Showing the conversation reads it, up to the newest message from the other person
+  // that's actually on screen (never "now", so a message not fetched yet stays unread).
+  const { setCount: setUnreadCount } = useUnread()
+  const latestIncomingId = messages?.findLast((m) => m.senderId !== meId)?.id ?? null
+  useEffect(() => {
+    if (!latestIncomingId) return
+    markConversationRead(listingId, latestIncomingId, buyerId)
+      .then(({ unreadCount }) => setUnreadCount(unreadCount))
+      .catch(() => {
+        // Not critical: it stays unread, and the next new message tries again.
+      })
+  }, [latestIncomingId, listingId, buyerId, setUnreadCount])
 
   // Keep the newest message in view.
   const count = messages?.length ?? 0

@@ -64,6 +64,38 @@ function threadWhere(t: Thread) {
   };
 }
 
+const conversationKey = (listingId: string, buyerId: string) => `${listingId}:${buyerId}`;
+
+/**
+ * My unread conversations: the other person has a message newer than my read
+ * marker, or I have no marker yet. Only messages sent to me count, so it can
+ * never include anyone else's conversation, and my own messages never make a
+ * conversation unread.
+ */
+export async function findUnreadConversations(me: string) {
+  return prisma.$queryRaw<{ listing_id: string; buyer_id: string }[]>`
+    SELECT t.listing_id, t.buyer_id
+    FROM (
+      SELECT m.listing_id,
+        CASE WHEN m.sender_id = l.seller_id THEN m.recipient_id ELSE m.sender_id END AS buyer_id,
+        max(m.created_at) AS last_incoming_at
+      FROM chat_messages m
+      JOIN listings l ON l.id = m.listing_id
+      WHERE m.recipient_id = ${me}::uuid AND l.status <> 'REMOVED'
+      GROUP BY 1, 2
+    ) t
+    LEFT JOIN chat_reads r
+      ON r.user_id = ${me}::uuid AND r.listing_id = t.listing_id AND r.buyer_id = t.buyer_id
+    WHERE r.last_read_at IS NULL OR t.last_incoming_at > r.last_read_at`;
+}
+
+// GET /api/chats/unread-count — how many of my conversations are unread. Polled by
+// the nav badge, so it's one query and has its own rate limit bucket (see rateLimit.ts).
+chatRouter.get("/unread-count", async (req, res) => {
+  const unread = await findUnreadConversations(req.user!.id);
+  res.json({ unreadCount: unread.length });
+});
+
 // GET /api/chats — my conversations, most recent first, each with its last message.
 chatRouter.get("/", async (req, res) => {
   const me = req.user!.id;
@@ -81,7 +113,7 @@ chatRouter.get("/", async (req, res) => {
       AND l.status <> 'REMOVED'
     ORDER BY m.listing_id, buyer_id, m.created_at DESC, m.id DESC`;
 
-  const [messages, listings, users] = await Promise.all([
+  const [messages, listings, users, unread] = await Promise.all([
     prisma.chatMessage.findMany({ where: { id: { in: latest.map((t) => t.message_id) } }, select: publicMessage }),
     prisma.listing.findMany({
       where: { id: { in: latest.map((t) => t.listing_id) } },
@@ -91,7 +123,9 @@ chatRouter.get("/", async (req, res) => {
       where: { id: { in: latest.flatMap((t) => [t.seller_id, t.buyer_id]) } },
       select: { id: true, displayName: true },
     }),
+    findUnreadConversations(me),
   ]);
+  const unreadKeys = new Set(unread.map((u) => conversationKey(u.listing_id, u.buyer_id)));
   const messageById = new Map(messages.map((m) => [m.id, m]));
   const listingById = new Map(listings.map((l) => [l.id, l]));
   const userById = new Map(users.map((u) => [u.id, u]));
@@ -105,6 +139,7 @@ chatRouter.get("/", async (req, res) => {
         role: t.seller_id === me ? ("seller" as const) : ("buyer" as const),
         otherUser: userById.get(otherId) ?? { id: otherId, displayName: "Unknown" },
         lastMessage: messageById.get(t.message_id)!,
+        unread: unreadKeys.has(conversationKey(t.listing_id, t.buyer_id)),
       };
     })
     .sort((a, b) => b.lastMessage.createdAt.getTime() - a.lastMessage.createdAt.getTime());
@@ -152,6 +187,34 @@ chatRouter.get("/:listingId/messages", async (req, res) => {
     select: publicMessage,
   });
   res.json({ buyerId: thread.buyerId, sellerId: thread.sellerId, messages: latest.reverse() });
+});
+
+// POST /api/chats/:listingId/read  { messageId, buyerId? }
+// Marks the conversation read up to that message (the newest one the client has
+// shown), not "now", so a message that arrived after the client's last fetch stays
+// unread. The marker only moves forward, so an older tab can't un-read anything.
+chatRouter.post("/:listingId/read", async (req, res) => {
+  const thread = await resolveThread(req, res, req.body?.buyerId);
+  if (!thread) return;
+
+  const messageId = req.body?.messageId;
+  const message = isUuid(messageId)
+    ? await prisma.chatMessage.findFirst({ where: { ...threadWhere(thread), id: messageId }, select: { createdAt: true } })
+    : null;
+  if (!message) {
+    res.status(404).json({ error: "No such message in this conversation" });
+    return;
+  }
+
+  const me = req.user!.id;
+  await prisma.$executeRaw`
+    INSERT INTO chat_reads (user_id, listing_id, buyer_id, last_read_at)
+    VALUES (${me}::uuid, ${thread.listingId}::uuid, ${thread.buyerId}::uuid, ${message.createdAt}::timestamptz)
+    ON CONFLICT (user_id, listing_id, buyer_id)
+    DO UPDATE SET last_read_at = GREATEST(chat_reads.last_read_at, EXCLUDED.last_read_at)`;
+
+  const unread = await findUnreadConversations(me);
+  res.json({ unreadCount: unread.length });
 });
 
 // POST /api/chats/:listingId/messages  { body, buyerId? }

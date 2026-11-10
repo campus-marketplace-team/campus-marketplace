@@ -74,6 +74,28 @@
   background: var(--color-primary-soft);
 }
 
+.app-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* Unread conversations on the Messages link. */
+.app-nav__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  background: var(--color-accent);
+  border-radius: var(--radius-pill);
+}
+
 .app-header__auth {
   display: flex;
   align-items: center;
@@ -98,6 +120,11 @@
   .app-nav {
     order: 3;
     flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+
+  .app-nav__link {
+    padding: 6px 10px;
   }
 }
 

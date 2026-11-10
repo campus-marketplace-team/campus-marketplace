@@ -17,11 +17,26 @@ export type ChatThread = {
   role: 'buyer' | 'seller'
   otherUser: { id: string; displayName: string }
   lastMessage: ChatMessage
+  /** The other person has written since I last read this conversation. */
+  unread: boolean
 }
 
 /** My conversations across all listings, most recent first. */
 export function fetchThreads(signal?: AbortSignal) {
   return api<{ threads: ChatThread[] }>('/api/chats', { signal })
+}
+
+/** How many of my conversations are unread. Cheap; polled by the nav badge. */
+export function fetchUnreadCount(signal?: AbortSignal) {
+  return api<{ unreadCount: number }>('/api/chats/unread-count', { signal })
+}
+
+/** Marks a conversation read up to `messageId` (the newest message shown). Returns my new unread count. */
+export function markConversationRead(listingId: string, messageId: string, buyerId?: string) {
+  return api<{ unreadCount: number }>(`/api/chats/${encodeURIComponent(listingId)}/read`, {
+    method: 'POST',
+    body: buyerId ? { messageId, buyerId } : { messageId },
+  })
 }
 
 /**

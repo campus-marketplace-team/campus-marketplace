@@ -1,0 +1,136 @@
+/* Messages inbox: one card-styled list, a row per conversation. */
+
+.inbox {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.inbox li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.inbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+
+.inbox-row:hover {
+  background: var(--color-surface-muted);
+}
+
+.inbox-row__photo {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+}
+
+.inbox-row__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.inbox-row__photo .listing-card__no-photo {
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.inbox-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inbox-row__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.inbox-row__title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-row__time {
+  flex: none;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.inbox-row__who {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 var(--space-1);
+  font-size: 0.85rem;
+}
+
+.inbox-row__status {
+  margin-left: var(--space-1);
+  padding: 1px 8px;
+  font-size: 0.72rem;
+}
+
+.inbox-row__preview {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-row--unread .inbox-row__title,
+.inbox-row--unread .inbox-row__preview {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.inbox-row--unread .inbox-row__time {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.inbox-row__dot {
+  margin-left: var(--space-1);
+}
+
+@media (max-width: 480px) {
+  .inbox-row {
+    padding: var(--space-3);
+  }
+
+  .inbox-row__photo {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+.messages-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}

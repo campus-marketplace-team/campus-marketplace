@@ -67,6 +67,7 @@ describe("rate limits", () => {
       checkout: { max: 10, windowMs: 60 * MINUTE },
       reportProblem: { max: 5, windowMs: 60 * MINUTE },
       chatSend: { max: 30, windowMs: MINUTE },
+      chatUnread: { max: 120, windowMs: 15 * MINUTE },
       general: { max: 300, windowMs: 15 * MINUTE },
     });
   });
@@ -220,6 +221,19 @@ describe("rate limits", () => {
     expect((await chat(tokenA)).status).toBe(429);
     expect((await chat(tokenB)).status).toBe(404);
     expect((await send(api, "GET", `/chats/${LISTING}/messages`, { token: tokenA })).status).not.toBe(429);
+  });
+
+  it("gives the unread badge poll its own per-user limit, separate from general and chat", async () => {
+    const api = await start({ chatUnread: 2, chatSend: 1, general: 1 });
+    const unread = (token: string) => send(api, "GET", "/chats/unread-count", { token });
+
+    expect((await unread(tokenA)).status).toBe(200);
+    expect((await unread(tokenA)).status).toBe(200);
+    expect((await unread(tokenA)).status).toBe(429);
+    expect((await unread(tokenB)).status).toBe(200);
+    // Polling the badge used none of tokenA's general or chat-send allowance.
+    expect((await send(api, "GET", "/listings", { token: tokenA })).status).toBe(200);
+    expect((await send(api, "POST", `/chats/${LISTING}/messages`, { token: tokenA, json: { body: "hi" } })).status).toBe(404);
   });
 
   it("doesn't count routes with their own limit toward the general one", async () => {

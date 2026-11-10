@@ -9,6 +9,7 @@ import { ListingDetailPage } from './pages/listings/ListingDetailPage'
 import { SellPage } from './pages/listings/SellPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { MyStuffPage } from './pages/me/MyStuffPage'
+import { MessagesPage } from './pages/messages/MessagesPage'
 import { HandoffQrPage } from './pages/orders/HandoffQrPage'
 import { OrderStatusPage } from './pages/orders/OrderStatusPage'
 import { ReportProblemPage } from './pages/orders/ReportProblemPage'
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
             children: [
               { path: '/sell', element: <SellPage /> },
               { path: '/me', element: <MyStuffPage /> },
+              { path: '/messages', element: <MessagesPage /> },
               { path: '/orders/:orderId', element: <OrderStatusPage /> },
               { path: '/orders/:orderId/handoff', element: <HandoffQrPage /> },
               { path: '/orders/:orderId/report', element: <ReportProblemPage /> },

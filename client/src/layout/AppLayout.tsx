@@ -1,9 +1,12 @@
 import { Link, NavLink, Outlet, useNavigate, useNavigation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
+import { useUnread } from '../chat/useUnread'
 import { Button, ButtonLink } from '../components'
 import './layout.css'
 
-const navItems = [
+type NavItem = { to: string; label: string; end?: boolean; badge?: number }
+
+const navItems: NavItem[] = [
   { to: '/', label: 'Browse', end: true },
   { to: '/sell', label: 'Sell' },
   { to: '/me', label: 'My stuff' },
@@ -12,9 +15,10 @@ const navItems = [
 /** Shell shared by every page: header + nav on top, routed page below. */
 export function AppLayout() {
   const auth = useAuth()
+  const unread = useUnread()
   const navigation = useNavigation()
-  const items =
-    auth.status === 'authenticated' && auth.user.isAdmin ? [...navItems, { to: '/admin', label: 'Admin' }] : navItems
+  const items: NavItem[] = [...navItems, { to: '/messages', label: 'Messages', badge: unread.count }]
+  if (auth.status === 'authenticated' && auth.user.isAdmin) items.push({ to: '/admin', label: 'Admin' })
   return (
     <div className="app">
       <header className="app-header">
@@ -34,6 +38,14 @@ export function AppLayout() {
                 className={({ isActive }) => (isActive ? 'app-nav__link app-nav__link--active' : 'app-nav__link')}
               >
                 {item.label}
+                {item.badge ? (
+                  <span className="app-nav__badge">
+                    <span aria-hidden="true">{item.badge > 9 ? '9+' : item.badge}</span>
+                    <span className="visually-hidden">
+                      {`, ${item.badge} unread conversation${item.badge === 1 ? '' : 's'}`}
+                    </span>
+                  </span>
+                ) : null}
               </NavLink>
             ))}
           </nav>

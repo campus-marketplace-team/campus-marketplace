@@ -137,6 +137,8 @@ model User {
   disputesOpened   Dispute[]
   approvals        Decision[]
   notifications    Notification[]
+  chatReads        ChatRead[]     @relation("ChatReadUser")
+  chatReadsAsBuyer ChatRead[]     @relation("ChatReadBuyer")
 
   @@map("users")
 }
@@ -158,6 +160,7 @@ model Listing {
   orders    Order[]
   messages  ChatMessage[]
   decisions Decision[]
+  chatReads ChatRead[]
 
   @@index([status, createdAt])
   @@index([category, status])
@@ -388,6 +391,23 @@ model ChatMessage {
   @@index([orderId])
   @@index([senderId, recipientId])
   @@map("chat_messages")
+}
+
+// How far a user has read one conversation (listing + buyer; the seller is the
+// listing's seller). A conversation is unread when the other person has a message
+// newer than lastReadAt, or there's no row yet. Disposable, so it cascades.
+model ChatRead {
+  userId     String   @map("user_id") @db.Uuid
+  listingId  String   @map("listing_id") @db.Uuid
+  buyerId    String   @map("buyer_id") @db.Uuid
+  lastReadAt DateTime @map("last_read_at") @db.Timestamptz(3)
+
+  user    User    @relation("ChatReadUser", fields: [userId], references: [id], onDelete: Cascade)
+  buyer   User    @relation("ChatReadBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([userId, listingId, buyerId])
+  @@map("chat_reads")
 }
 
 // Messages to a user about one of their orders (e.g. "voided: no handoff in

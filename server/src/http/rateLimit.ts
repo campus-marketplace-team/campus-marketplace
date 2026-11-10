@@ -21,6 +21,8 @@ export const DEFAULT_RATE_LIMITS = {
   checkout: { max: 10, windowMs: 60 * MINUTE },
   reportProblem: { max: 5, windowMs: 60 * MINUTE },
   chatSend: { max: 30, windowMs: MINUTE },
+  /** The nav badge's poll (every 30 s plus tab focus), kept out of `general` so it never crowds out chat polling. */
+  chatUnread: { max: 120, windowMs: 15 * MINUTE },
   /** Per user when logged in, otherwise per IP, so students sharing campus wifi don't share a limit. */
   general: { max: 300, windowMs: 15 * MINUTE },
 } as const satisfies Record<string, RateLimitRule>;
@@ -34,8 +36,10 @@ const SIGNUP_ROUTE = /^\/auth\/signup\/?$/i;
 const CHECKOUT_ROUTE = /^\/orders\/?$/i;
 const REPORT_PROBLEM_ROUTE = /^\/orders\/[^/]+\/dispute\/?$/i;
 const CHAT_SEND_ROUTE = /^\/chats\/[^/]+\/messages\/?$/i;
+const CHAT_UNREAD_ROUTE = /^\/chats\/unread-count\/?$/i;
 
-function perUserBucket({ method, path }: Request): "checkout" | "reportProblem" | "chatSend" | null {
+function perUserBucket({ method, path }: Request): "checkout" | "reportProblem" | "chatSend" | "chatUnread" | null {
+  if (method === "GET" && CHAT_UNREAD_ROUTE.test(path)) return "chatUnread";
   if (method !== "POST") return null;
   if (CHECKOUT_ROUTE.test(path)) return "checkout";
   if (REPORT_PROBLEM_ROUTE.test(path)) return "reportProblem";
@@ -79,6 +83,7 @@ export function createRateLimiters(overrides: Partial<RateLimits> = {}): { befor
     checkout: limiter(rules.checkout),
     reportProblem: limiter(rules.reportProblem),
     chatSend: limiter(rules.chatSend),
+    chatUnread: limiter(rules.chatUnread),
     general: limiter(rules.general),
   };
 

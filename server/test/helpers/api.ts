@@ -55,7 +55,7 @@ const NO_LIMIT = { max: 1_000_000, windowMs: 60_000 };
 
 export async function startApi(options: Parameters<typeof createApp>[0] = {}): Promise<Api> {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-  const rateLimits = { authEmail: NO_LIMIT, authIp: NO_LIMIT, signup: NO_LIMIT, checkout: NO_LIMIT,reportProblem: NO_LIMIT, chatSend: NO_LIMIT, general: NO_LIMIT, ...options.rateLimits };
+  const rateLimits = { authEmail: NO_LIMIT, authIp: NO_LIMIT, signup: NO_LIMIT, checkout: NO_LIMIT,reportProblem: NO_LIMIT, chatSend: NO_LIMIT, chatUnread: NO_LIMIT, general: NO_LIMIT, ...options.rateLimits };
   const server = createApp({ classify: async () => lowRisk, ...options, rateLimits }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
