@@ -2,14 +2,18 @@
 // (prisma/seedListings.ts). Listing photos are client/public/images/<slug>.webp,
 // fetched once with scripts/fetchListingImages.ts.
 // Re-running it puts a reserved, sold or removed seed listing (ids 201+) back
-// on sale once none of its orders is active (see seedListingAction). It never
-// touches demo listings (3xx), other users' listings, orders, ledger entries
-// or decisions.
+// on sale unless one of its orders still holds the buyer's money (AUTHORIZED,
+// IN_DISPUTE, ESCALATED; see seedListingAction). It never touches demo
+// listings (3xx), other users' listings, orders, ledger entries or decisions.
+// With DEMO_SELLER_PAYPAL_EMAIL set (and the PayPal sandbox), every seed user's
+// payout email is set to it, so the worker can pay out their captured sales.
 // Run: npm run seed -w server 
 
 import { prisma } from "../src/db.js";
 import { hashPassword } from "../src/auth/password.js";
 import type { ListingCategory, ListingStatus, Prisma } from "../src/generated/prisma/client.js";
+import { getPayPalConfig } from "../src/paypal/client.js";
+import { seedPayoutEmail } from "./seedPayoutEmail.js";
 import { SEED_LISTINGS, seedListingAction, seedPhotoPath, type SeedListingOrder } from "./seedListings.js";
 
 // Dev-only login for every seed user. Never use seed accounts with real money.
@@ -48,7 +52,7 @@ async function seedOneListing(tx: Prisma.TransactionClient, id: string, data: Se
   const [current] = await tx.$queryRaw<{ status: ListingStatus; sellerId: string }[]>`
     SELECT "status", "seller_id"::text AS "sellerId" FROM "listings" WHERE "id" = ${id}::uuid FOR UPDATE`;
   const orders = await tx.$queryRaw<SeedListingOrder[]>`
-    SELECT "id"::text AS "id", "state", "paypal_order_id" AS "paypalOrderId"
+    SELECT "id"::text AS "id", "state"
     FROM "orders" WHERE "listing_id" = ${id}::uuid
     ORDER BY "created_at"
     FOR UPDATE`;
@@ -69,6 +73,11 @@ async function main() {
   }
 
   const seedUserIds = users.map((u) => u.id);
+  const payout = seedPayoutEmail(process.env.DEMO_SELLER_PAYPAL_EMAIL, getPayPalConfig()?.baseUrl ?? process.env.PAYPAL_BASE_URL);
+  if (payout.kind === "set") {
+    await prisma.user.updateMany({ where: { id: { in: seedUserIds } }, data: { paypalEmail: payout.email } });
+  }
+
   const reset: string[] = [];
   const skipped: string[] = [];
   for (const [i, l] of SEED_LISTINGS.entries()) {
@@ -86,11 +95,13 @@ async function main() {
     else if (action.kind === "skip" && action.reason === "OTHER_SELLER") {
       skipped.push(`${l.title} [${id}]: now sold by another user`);
     } else if (action.kind === "skip") {
-      skipped.push(`${l.title} [${id}]: order ${action.order.id} is ${action.order.state}`);
+      skipped.push(`${l.title} [${id}]: order ${action.order.id} is ${action.order.state} (money still held)`);
     }
   }
 
   console.log(`Seeded ${users.length} users and ${SEED_LISTINGS.length} listings.`);
+  if (payout.kind === "set") console.log(`Seed users' payout email set to ${payout.email}.`);
+  else console.log(`Seed users' payout emails left as they were: ${payout.reason}.`);
   if (reset.length) console.log(`Reset to ACTIVE (${reset.length}):\n  ${reset.join("\n  ")}`);
   if (skipped.length) console.log(`Skipped (${skipped.length}):\n  ${skipped.join("\n  ")}`);
   console.log(`Seed users log in with password "${SEED_PASSWORD}".`);

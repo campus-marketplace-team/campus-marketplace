@@ -28,26 +28,19 @@ export type SeedListing = {
 export const seedPhotoPath = (slug: string) => `/images/${slug}.webp`;
 
 /**
- * Order states that still hold the listing: money is held or moving, a dispute
- * is open, or the buyer is in PayPal right now (CREATED with a PayPal order).
- * The rest (PAID_OUT, VOIDED, REFUNDED, PARTIAL_REFUND, RELEASED, BLOCKED, and
- * CREATED without a PayPal order) are finished or never started.
+ * Order states that keep a seed listing off sale on a re-seed: the buyer's
+ * money is still held (authorized, or held for a dispute). Every other state
+ * is history or never held money (CREATED, BLOCKED), and once captured the
+ * payout no longer needs the listing, so none of them stop a re-list. Orders
+ * are never changed by the seed either way.
  */
-export const ACTIVE_ORDER_STATES = [
-  "AUTHORIZED",
-  "IN_DISPUTE",
-  "ESCALATED",
-  "CAPTURED",
-  "PAYOUT_PENDING",
-  "PAYOUT_RETRY",
-] as const satisfies readonly OrderState[];
+export const HOLDING_ORDER_STATES = ["AUTHORIZED", "IN_DISPUTE", "ESCALATED"] as const satisfies readonly OrderState[];
 
-export type SeedListingOrder = { id: string; state: OrderState; paypalOrderId: string | null };
+export type SeedListingOrder = { id: string; state: OrderState };
 
-/** Whether this order still holds its listing (see ACTIVE_ORDER_STATES). */
-export function isActiveOrder(order: Pick<SeedListingOrder, "state" | "paypalOrderId">): boolean {
-  if (order.state === "CREATED") return order.paypalOrderId !== null;
-  return (ACTIVE_ORDER_STATES as readonly OrderState[]).includes(order.state);
+/** Whether this order still holds the buyer's money (see HOLDING_ORDER_STATES). */
+export function isHoldingOrder(order: Pick<SeedListingOrder, "state">): boolean {
+  return (HOLDING_ORDER_STATES as readonly OrderState[]).includes(order.state);
 }
 
 export type SeedListingAction =
@@ -55,14 +48,14 @@ export type SeedListingAction =
   | { kind: "update" } // still for sale: refresh its data
   | { kind: "reset" } // back to ACTIVE with fresh data
   | { kind: "skip"; reason: "OTHER_SELLER" }
-  | { kind: "skip"; reason: "ACTIVE_ORDER"; order: { id: string; state: OrderState } };
+  | { kind: "skip"; reason: "MONEY_HELD"; order: { id: string; state: OrderState } };
 
 /**
  * What re-running the seed does to a seed listing, given its current row (null
  * if it doesn't exist yet), the ids of the seed users, and every order on it.
  * A listing someone else now sells is never touched. A reserved, sold or
- * removed one goes back on sale only once none of its orders is active;
- * otherwise the first active order is reported as what blocked it.
+ * removed one goes back on sale unless one of its orders still holds the
+ * buyer's money; then the first such order is reported as what blocked it.
  */
 export function seedListingAction(
   current: { status: ListingStatus; sellerId: string } | null,
@@ -72,8 +65,8 @@ export function seedListingAction(
   if (current === null) return { kind: "create" };
   if (!seedUserIds.includes(current.sellerId)) return { kind: "skip", reason: "OTHER_SELLER" };
   if (current.status === "ACTIVE") return { kind: "update" };
-  const blocking = orders.find(isActiveOrder);
-  if (blocking) return { kind: "skip", reason: "ACTIVE_ORDER", order: { id: blocking.id, state: blocking.state } };
+  const blocking = orders.find(isHoldingOrder);
+  if (blocking) return { kind: "skip", reason: "MONEY_HELD", order: { id: blocking.id, state: blocking.state } };
   return { kind: "reset" };
 }
 
