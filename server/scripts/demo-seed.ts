@@ -32,6 +32,7 @@ import { NEW_SELLER_DAYS } from "../src/risk/policy.js";
 import { classifyRisk } from "../src/risk/classifier.js";
 import type { Classify } from "../src/risk/assess.js";
 import { DEMO_DISPUTE_REPORT, DEMO_NEW_USER, DEMO_SCENARIOS, type DemoScenario } from "../prisma/demoData.js";
+import { planDemoScenario, type DemoOrder } from "../prisma/demoResume.js";
 import { seedPhotoPath } from "../prisma/seedListings.js";
 
 /** Same dev-only password as prisma/seed.ts. Sandbox test data, not a secret. */
@@ -121,12 +122,15 @@ async function ensureChat(scenario: DemoScenario, { buyerId, sellerId }: Parties
   console.log(`  Added ${scenario.chat.length} chat messages.`);
 }
 
-async function latestOrder(scenario: DemoScenario, { buyerId }: Parties) {
-  return prisma.order.findFirst({
-    where: { listingId: scenario.listing.id, buyerId },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, state: true, paypalOrderId: true },
+/** The listing's status and every order on it, from any buyer: what planDemoScenario decides from. */
+async function listingOrders(scenario: DemoScenario) {
+  const listing = await prisma.listing.findUniqueOrThrow({ where: { id: scenario.listing.id }, select: { status: true } });
+  const rows = await prisma.order.findMany({
+    where: { listingId: scenario.listing.id },
+    select: { id: true, state: true, createdAt: true, buyer: { select: { email: true } } },
   });
+  const orders: DemoOrder[] = rows.map((o) => ({ id: o.id, state: o.state, createdAt: o.createdAt, buyerEmail: o.buyer.email }));
+  return { listingStatus: listing.status, orders };
 }
 
 // ---------- Scam: blocked before PayPal is called ----------
@@ -173,17 +177,33 @@ async function runScam() {
 
 type Prepared = { key: "sale" | "dispute"; scenario: DemoScenario; parties: Parties; orderId: string; paypalOrderId: string | null };
 
-/** Gets the scenario's order as far as AUTHORIZED, except for the buyer's approval in PayPal. */
-async function prepare(key: "sale" | "dispute", paypal: PayPalClient): Promise<Prepared> {
+const PLAN_NOTE: Record<"finish" | "wait" | "done", Record<"sale" | "dispute", string>> = {
+  finish: { sale: "resuming: next is the QR scan and capture", dispute: "resuming: next is the dispute report" },
+  wait: { sale: "nothing to do here: the worker sends the seller's payout", dispute: "" },
+  done: { sale: "the sale is complete", dispute: "the dispute is open" },
+};
+
+/**
+ * Gets the scenario's order as far as AUTHORIZED, except for the buyer's approval
+ * in PayPal, or picks up an order that's already further along. Returns null,
+ * after saying why, when the scenario can't continue (see planDemoScenario).
+ */
+async function prepare(key: "sale" | "dispute", paypal: PayPalClient): Promise<Prepared | null> {
   const scenario = DEMO_SCENARIOS[key];
   console.log(`\n${key === "sale" ? "Completed sale" : "Open dispute"}`);
   const p = await parties(scenario);
   await ensureListing(scenario, p.sellerId);
 
-  const existing = await latestOrder(scenario, p);
-  if (existing && existing.state !== "CREATED" && existing.state !== "VOIDED" && existing.state !== "BLOCKED") {
-    console.log(`  Order ${existing.id} is already ${existing.state}.`);
-    return { key, scenario, parties: p, orderId: existing.id, paypalOrderId: null };
+  const { listingStatus, orders } = await listingOrders(scenario);
+  const plan = planDemoScenario(key, scenario.buyerEmail, listingStatus, orders);
+  if (plan.step === "stuck") {
+    console.error(`  ! Can't continue: ${plan.reason}`);
+    if (plan.order) console.error(`    ${scenario.buyerEmail}'s own latest order is ${plan.order.id} (${plan.order.state}).`);
+    return null;
+  }
+  if (plan.step !== "start") {
+    console.log(`  Order ${plan.order.id} is ${plan.order.state}: ${PLAN_NOTE[plan.step][key]}.`);
+    return { key, scenario, parties: p, orderId: plan.order.id, paypalOrderId: null };
   }
 
   await ensureChat(scenario, p);
@@ -260,13 +280,20 @@ async function main() {
   await ensureSellerPayoutEmail(DEMO_SCENARIOS.sale.listing.sellerEmail);
 
   await runScam();
-  const prepared = [await prepare("sale", paypal), await prepare("dispute", paypal)];
+  // A stuck scenario doesn't stop the other one; the script still exits non-zero.
+  const [sale, dispute] = [await prepare("sale", paypal), await prepare("dispute", paypal)];
+  const prepared = [sale, dispute].filter((w): w is Prepared => w !== null);
   await authorizeAll(paypal, prepared.filter((w) => w.paypalOrderId !== null));
-  await finishSale(paypal, prepared[0]);
-  await finishDispute(prepared[1]);
+  if (sale) await finishSale(paypal, sale);
+  if (dispute) await finishDispute(dispute);
 
   console.log("\nWhere each one stands:");
   for (const w of prepared) console.log(`  ${w.key.padEnd(8)} order ${w.orderId}: ${await stateOf(w.orderId)}`);
+  if (prepared.length < 2) {
+    console.error("\nAt least one scenario couldn't continue (see the ! lines above). Nothing was changed for it.");
+    process.exitCode = 1;
+    return;
+  }
   console.log(`\nLog in as seed.alex.chen@mcmaster.ca (password ${SEED_PASSWORD}, admin) to see them on /admin.`);
   console.log("The sale reaches PAID_OUT once the worker's payout goes through; the dispute agent's proposal waits in the approval queue.");
 }

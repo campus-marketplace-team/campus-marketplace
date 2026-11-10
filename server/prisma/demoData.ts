@@ -2,8 +2,10 @@
 // regular seed (prisma/seed.ts). Each scenario goes through the app's own code
 // against the PayPal sandbox, so every PayPal id is real:
 //
-//   sale     Priya buys Alex's laptop stand: approved in PayPal, QR scanned,
+//   sale     Priya buys Alex's yoga mat: approved in PayPal, QR scanned,
 //            captured. The worker then pays Alex out (PAYOUT_PENDING → PAID_OUT).
+//            (Listing 304. The first sale listing, 301, the laptop stand, is held
+//            by a manual test order and is no longer part of the demo.)
 //   scam     Jordan tries to buy a $25 "sealed" Switch from Sam, an account a few
 //            days old who asks for an Interac e-transfer in chat. The hard rule
 //            new_seller_off_platform_low_price blocks it before PayPal is called.
@@ -52,15 +54,14 @@ export type DemoListing = {
 
 export const DEMO_LISTINGS: Record<"sale" | "scam" | "dispute", DemoListing> = {
   sale: {
-    id: demoId(301),
+    id: demoId(304),
     sellerEmail: DEMO_EMAILS.alex,
-    category: "FURNITURE",
-    priceCents: 3000,
-    title: "Foldable laptop stand",
-    description: "Aluminium, six height settings, folds flat into a backpack. Fixed my neck pain during exam season.",
-    slug: "laptop-stand",
-    photoSearch: "laptop stand",
-    pixabayId: 6332543,
+    category: "SPORTS",
+    priceCents: 2500,
+    title: "Yoga mat with carry strap",
+    description: "6 mm thick, non-slip on both sides. Used for one term of drop-in classes at the Pulse, wiped down and rolled up.",
+    slug: "yoga-mat",
+    photoSearch: "yoga mat",
   },
   scam: {
     id: demoId(302),
@@ -95,7 +96,7 @@ export const DEMO_SCENARIOS: Record<"sale" | "scam" | "dispute", DemoScenario> =
     listing: DEMO_LISTINGS.sale,
     buyerEmail: DEMO_EMAILS.priya,
     chat: [
-      { from: "buyer", body: "Hi! Is the laptop stand still available? Could we meet at Mills Library tomorrow at 2?" },
+      { from: "buyer", body: "Hi! Is the yoga mat still available? Could we meet at Mills Library tomorrow at 2?" },
       { from: "seller", body: "Yes, still available. Mills Library entrance at 2 works for me." },
       { from: "buyer", body: "Great, see you then! I'll pay through the app." },
     ],
