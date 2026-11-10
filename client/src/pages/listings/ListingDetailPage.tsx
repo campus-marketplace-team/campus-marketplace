@@ -76,6 +76,8 @@ function ListingDetail({ listing: loaded, notice }: { listing: Listing; notice: 
   const auth = useAuth()
   // Set once this buyer's payment is authorized; the listing is then reserved for them.
   const [order, setOrder] = useState<CheckoutOrder | null>(null)
+  // The newest chat message, so the checkout can drop a risk result the chat has moved past.
+  const [latestMessageId, setLatestMessageId] = useState<string | null>(null)
   const listing: Listing = order ? { ...loaded, status: 'RESERVED' } : loaded
   const isSeller = auth.status === 'authenticated' && auth.user.id === listing.seller.id
   const photos = listing.photoUrls ?? []
@@ -174,9 +176,11 @@ function ListingDetail({ listing: loaded, notice }: { listing: Listing; notice: 
             </div>
           </Card>
           {auth.status === 'authenticated' && !isSeller && listing.status === 'ACTIVE' && (
-            <PayPalCheckout listing={listing} onAuthorized={setOrder} />
+            <PayPalCheckout listing={listing} onAuthorized={setOrder} chatVersion={latestMessageId} />
           )}
-          {auth.status === 'authenticated' && <ChatPanel listing={listing} meId={auth.user.id} />}
+          {auth.status === 'authenticated' && (
+            <ChatPanel listing={listing} meId={auth.user.id} onLatestMessage={setLatestMessageId} />
+          )}
         </div>
       </div>
     </Page>

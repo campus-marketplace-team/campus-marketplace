@@ -7,3 +7,14 @@
 .checkout__buttons {
   max-width: 420px;
 }
+
+.risk-reasons__lead {
+  display: block;
+  margin-top: 0.5rem;
+  font-weight: 600;
+}
+
+.risk-reasons {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}

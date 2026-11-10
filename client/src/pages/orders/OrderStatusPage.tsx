@@ -18,6 +18,7 @@ import {
 import { fetchOrder, uploadDisputePhoto, type OrderDispute, type OrderStatus } from '../../orders/ordersApi'
 import type { OrderStatusNotice } from './ReportProblemPage'
 import './orders.css'
+import { RiskReasonList } from '../../checkout/RiskReasons'
 
 // Order status for the buyer and the seller: where the order stands, the
 // handoff deadline countdown while the payment is held, the next step (seller
@@ -106,7 +107,12 @@ function OrderDetails({ order, onDisputeChange }: { order: OrderStatus; onDisput
           </ul>
         </Alert>
       ) : null}
-      {order.riskWarning && order.state === 'AUTHORIZED' && <Alert tone="error">{RISK_WARNING}</Alert>}
+      {order.riskWarning && order.state === 'AUTHORIZED' && (
+        <Alert tone="error">
+          {RISK_WARNING}
+          <RiskReasonList reasons={order.riskReasons ?? []} />
+        </Alert>
+      )}
       <Card>
         <div className="order-status">
           <Link to={`/listings/${order.listing.id}`} className="order-status__item">

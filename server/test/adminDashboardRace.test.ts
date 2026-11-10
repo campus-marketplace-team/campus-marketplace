@@ -20,6 +20,12 @@ vi.mock("../src/db.js", () => {
       reconciliationFlag: { count: zero, findMany: async () => [{ id: "flag-gone", order: null }, { id: "flag", order: { state: "CREATED" } }] },
       outboxEvent: { count: zero, findMany: none },
       claudeBudgetUsage: { findMany: none },
+      chatMessage: {
+        findMany: async () => [
+          { listingId: "l-gone", senderId: "s", body: "venmo me", createdAt: new Date(), listing: null },
+          { listingId: "l", senderId: "s", body: "venmo me", createdAt: new Date(), listing: { title: "Still here", status: "ACTIVE", sellerId: "s", seller: party } },
+        ],
+      },
       dispute: { findMany: async () => [{ id: "esc-gone", order: deletedMidRead }, { id: "esc", order: whole }] },
       decision: {
         groupBy: none,
@@ -41,6 +47,7 @@ describe("getAdminDashboard when a row is deleted mid-read", () => {
     expect(body.flags.map((f) => f.id)).toEqual(["flag"]);
     expect(body.escalatedDisputes.map((d) => d.id)).toEqual(["esc"]);
     expect(body.pendingDisputeDecisions.map((d) => d.id)).toEqual(["pending"]);
+    expect(body.sellerRedFlags.map((f) => f.listingId)).toEqual(["l"]);
   });
 
   it("keeps a decision record, without the order details it lost", async () => {

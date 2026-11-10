@@ -2,6 +2,7 @@ import { ORDER_STATES, type OrderState } from "@campus/shared";
 import { z } from "zod";
 import { getClaudeUsage } from "../ai/claude.js";
 import { prisma } from "../db.js";
+import { findOffPlatformPhrases, type OffPlatformPhrase } from "../risk/features.js";
 
 // Data for the admin dashboard (client/src/pages/admin). Read-only. Money is
 // computed from the ledger, never from order fields:
@@ -11,7 +12,9 @@ import { prisma } from "../db.js";
 // plus seller_payable (owed to sellers) and platform_fees (ours).
 
 /** Rows per grid; the totals cover everything. */
-export const DASHBOARD_LIMITS = { orders: 500, flags: 200, deadLetters: 200, disputes: 100, decisions: 200 } as const;
+export const DASHBOARD_LIMITS = { orders: 500, flags: 200, deadLetters: 200, disputes: 100, decisions: 200, sellerFlags: 200 } as const;
+/** Newest chat messages scanned for seller red flags on each load. */
+export const SELLER_FLAG_SCAN_MESSAGES = 5000;
 const MAX_PAYLOAD_PREVIEW = 500;
 
 export type MoneyTotals = { held: number; captured: number; paidOut: number; sellerPayable: number; platformFees: number };
@@ -227,8 +230,65 @@ async function getDecisionRecords() {
   };
 }
 
+export const SELLER_OFF_PLATFORM_FLAG = "Seller asked for off-platform payment";
+
+/**
+ * Listings whose seller wrote an off-platform payment phrase in their own chat
+ * messages, whatever any checkout's risk outcome was (or whether anyone checked
+ * out). Phrase ids only: the chat text itself never leaves the server.
+ */
+async function getSellerRedFlags() {
+  const messages = await prisma.chatMessage.findMany({
+    orderBy: { createdAt: "desc" },
+    take: SELLER_FLAG_SCAN_MESSAGES,
+    select: {
+      listingId: true,
+      senderId: true,
+      body: true,
+      createdAt: true,
+      listing: { select: { title: true, status: true, sellerId: true, seller: { select: { displayName: true } } } },
+    },
+  });
+  type Flag = {
+    listingId: string;
+    listingTitle: string;
+    listingStatus: string;
+    seller: string;
+    flag: string;
+    phrases: OffPlatformPhrase[];
+    messages: number;
+    firstSeenAt: Date;
+    lastSeenAt: Date;
+  };
+  const byListing = new Map<string, Flag>();
+  for (const m of messages) {
+    // A relation can come back null if the listing was deleted mid-read (see complete()).
+    if (!m.listing?.seller || m.senderId !== m.listing.sellerId) continue;
+    const phrases = findOffPlatformPhrases(m.body);
+    if (phrases.length === 0) continue;
+    const flag = byListing.get(m.listingId) ?? {
+      listingId: m.listingId,
+      listingTitle: m.listing.title,
+      listingStatus: m.listing.status,
+      seller: m.listing.seller.displayName,
+      flag: SELLER_OFF_PLATFORM_FLAG,
+      phrases: [],
+      messages: 0,
+      firstSeenAt: m.createdAt,
+      lastSeenAt: m.createdAt,
+    };
+    flag.phrases = [...new Set([...flag.phrases, ...phrases])];
+    flag.messages += 1;
+    if (m.createdAt < flag.firstSeenAt) flag.firstSeenAt = m.createdAt;
+    if (m.createdAt > flag.lastSeenAt) flag.lastSeenAt = m.createdAt;
+    byListing.set(m.listingId, flag);
+  }
+  // Messages are newest first, so listings are in order of their latest flagged message.
+  return [...byListing.values()].slice(0, DASHBOARD_LIMITS.sellerFlags);
+}
+
 export async function getAdminDashboard() {
-  const [stateGroups, accountSums, orderCount, orders, flags, openFlagCount, deadLetters, deadLetterCount, disputeQueues, decisionRecords, claudeUsage] = await Promise.all([
+  const [stateGroups, accountSums, orderCount, orders, flags, openFlagCount, deadLetters, deadLetterCount, disputeQueues, decisionRecords, claudeUsage, sellerRedFlags] = await Promise.all([
     prisma.order.groupBy({ by: ["state"], _count: { _all: true } }),
     prisma.ledgerEntry.groupBy({ by: ["account"], _sum: { amountCents: true } }),
     prisma.order.count(),
@@ -277,6 +337,7 @@ export async function getAdminDashboard() {
     getDisputeQueues(),
     getDecisionRecords(),
     getClaudeUsage(),
+    getSellerRedFlags(),
   ]);
 
   // Per-order ledger totals for the rows shown.
@@ -309,6 +370,7 @@ export async function getAdminDashboard() {
     ...disputeQueues,
     ...decisionRecords,
     claudeUsage,
+    sellerRedFlags,
   };
 }
 

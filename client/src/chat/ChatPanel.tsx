@@ -16,7 +16,16 @@ const THREAD_POLL_MS = 15000
  * Chat on a listing's page, for a logged-in user. Buyers get their one conversation
  * with the seller; the seller picks which buyer's conversation to read.
  */
-export function ChatPanel({ listing, meId }: { listing: Listing; meId: string }) {
+export function ChatPanel({
+  listing,
+  meId,
+  onLatestMessage,
+}: {
+  listing: Listing
+  meId: string
+  /** Buyer side only: called with the newest message's id whenever it changes. */
+  onLatestMessage?: (id: string | null) => void
+}) {
   return listing.seller.id === meId ? (
     <SellerChats listing={listing} meId={meId} />
   ) : (
@@ -26,6 +35,7 @@ export function ChatPanel({ listing, meId }: { listing: Listing; meId: string })
         meId={meId}
         otherName={listing.seller.displayName}
         canStart={listing.status === 'ACTIVE'}
+        onLatestMessage={onLatestMessage}
       />
     </Card>
   )
@@ -110,9 +120,10 @@ type ConversationProps = {
   otherName: string
   /** Whether a new conversation can be started (the listing is still for sale). */
   canStart: boolean
+  onLatestMessage?: (id: string | null) => void
 }
 
-function Conversation({ listingId, buyerId, meId, otherName, canStart }: ConversationProps) {
+function Conversation({ listingId, buyerId, meId, otherName, canStart, onLatestMessage }: ConversationProps) {
   const [messages, setMessages] = useState<ChatMessage[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -139,6 +150,16 @@ function Conversation({ listingId, buyerId, meId, otherName, canStart }: Convers
     ),
     MESSAGE_POLL_MS,
   )
+
+  const loaded = messages !== null
+  const latestId = messages?.length ? messages[messages.length - 1].id : null
+  const onLatestRef = useRef(onLatestMessage)
+  useEffect(() => {
+    onLatestRef.current = onLatestMessage
+  })
+  useEffect(() => {
+    if (loaded) onLatestRef.current?.(latestId)
+  }, [latestId, loaded])
 
   // Keep the newest message in view.
   const count = messages?.length ?? 0

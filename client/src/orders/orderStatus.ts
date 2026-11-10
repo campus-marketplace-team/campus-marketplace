@@ -1,4 +1,4 @@
-import { isDisputeReason, LISTING_LIMITS, type DisputeReason, type OrderState } from '@campus/shared'
+import { isDisputeReason, LISTING_LIMITS, RISK_HOLD_WINDOW_HOURS, type DisputeReason, type OrderState } from '@campus/shared'
 
 // What each order state means to people, for the status page and "My orders".
 
@@ -39,9 +39,15 @@ export function disputePhotoProblem(file: File): string | null {
   return null
 }
 
-/** Shown to the buyer of an order the risk check flagged. Fixed text: the check's reasons are internal. */
-export const RISK_WARNING =
-  'Our safety checks flagged this order, so you have extra time to meet. Never pay outside the app, and only scan the seller’s code once you have the item and are happy with it.'
+/**
+ * Shown to the buyer of an order the risk check held with a warning. Fixed text: the
+ * only specifics added to it are the fixed labels in BUYER_RISK_REASON_LABELS.
+ */
+export const RISK_WARNING = `We noticed signs of a possible scam in this chat (for example, a request to pay outside the app). You can still buy safely here: your payment is only held, never taken, until you scan the seller’s code with the item in hand. We’ve given you up to ${RISK_HOLD_WINDOW_HOURS / 24} days to meet. Never pay with gift cards, e-transfer or crypto.`
+
+/** Shown to a buyer whose checkout on a listing the risk check blocked. */
+export const RISK_BLOCKED =
+  'Our safety checks blocked this purchase, so you can’t pay for this listing here. You haven’t been charged. Never pay the seller outside the app.'
 
 /** Badge colour group for a state. */
 export function stateTone(state: OrderState): 'waiting' | 'done' | 'problem' {

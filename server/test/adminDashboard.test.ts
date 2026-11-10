@@ -246,3 +246,39 @@ describe("GET /api/admin/dashboard", () => {
     });
   });
 });
+
+describe("seller red flags", () => {
+  it("list a listing whose seller asked for off-platform payment, with phrase ids but never the chat text", async () => {
+    const seller = await createTestUser("dash-flag-seller");
+    const buyer = await createTestUser("dash-flag-buyer");
+    const flagged = await prisma.listing.create({
+      data: { sellerId: seller.id, title: "flagged listing", description: "test", category: "OTHER", priceCents: 5000 },
+    });
+    const buyerOnly = await prisma.listing.create({
+      data: { sellerId: seller.id, title: "buyer said it", description: "test", category: "OTHER", priceCents: 5000 },
+    });
+    await prisma.chatMessage.createMany({
+      data: [
+        { listingId: flagged.id, senderId: seller.id, recipientId: buyer.id, body: "SECRET-CHAT just e-transfer me instead" },
+        { listingId: flagged.id, senderId: seller.id, recipientId: buyer.id, body: "or venmo works" },
+        { listingId: flagged.id, senderId: buyer.id, recipientId: seller.id, body: "ok" },
+        // A buyer's words never flag the seller.
+        { listingId: buyerOnly.id, senderId: buyer.id, recipientId: seller.id, body: "can I pay with cash app?" },
+      ],
+    });
+
+    const res = await api.call("GET", "/admin/dashboard", { token: adminToken });
+    expect(res.status).toBe(200);
+    const flags: { listingId: string }[] = res.body.sellerRedFlags;
+    const flag = flags.find((f) => f.listingId === flagged.id);
+    expect(flag).toMatchObject({
+      listingTitle: "flagged listing",
+      flag: "Seller asked for off-platform payment",
+      messages: 2,
+      listingStatus: "ACTIVE",
+    });
+    expect((flag as unknown as { phrases: string[] }).phrases.sort()).toEqual(["e_transfer", "venmo"]);
+    expect(flags.find((f) => f.listingId === buyerOnly.id)).toBeUndefined();
+    expect(JSON.stringify(res.body.sellerRedFlags)).not.toContain("SECRET-CHAT");
+  });
+});

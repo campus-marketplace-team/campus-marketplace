@@ -7,7 +7,8 @@ import { addDisputePhoto, openDispute } from "../orders/dispute.js";
 import { issueHandoffToken, redeemHandoffToken } from "../orders/handoff.js";
 import { getOrderStatus, listMyOrders } from "../orders/orderStatus.js";
 import type { PayPalClient } from "../paypal/client.js";
-import type { Classify } from "../risk/assess.js";
+import { buyerRiskStatus, type Classify } from "../risk/assess.js";
+import { isUuid } from "../ids.js";
 
 // Order endpoints. GET / and GET /:id back "My orders" and the order status
 // page. The PayPal Buttons in the client call POST / from
@@ -49,13 +50,24 @@ export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Clas
   // GET /api/orders  — orders I bought or sold (not CREATED), newest first. Returns { orders }.
   router.get("/", (req, res) => respond(res, async () => ({ orders: await listMyOrders(req.user!.id) })));
 
+  // GET /api/orders/risk?listingId=  (a would-be buyer) — the risk result to show on the listing
+  // page: { outcome: NORMAL | HOLD_WITH_WARNING | BLOCKED | null, reasons }. null means not
+  // assessed, or the chat or listing changed since, so the next Pay click assesses again.
+  router.get("/risk", (req, res) =>
+    respond(res, async () => {
+      const { listingId } = req.query;
+      if (!isUuid(listingId)) throw new CheckoutError(400, "BAD_REQUEST", "listingId is required");
+      return buyerRiskStatus(req.user!.id, listingId);
+    }),
+  );
+
   // GET /api/orders/:id  (the order's buyer or seller) — status page data. Returns { order }.
   router.get("/:id", (req, res) =>
     respond(res, async () => ({ order: await getOrderStatus(req.user!.id, req.params.id) })),
   );
 
   // POST /api/orders  { listingId }  (buyer) — assesses risk and starts checkout, returns
-  // { orderId, paypalOrderId, riskWarning }, or 403 RISK_BLOCKED.
+  // { orderId, paypalOrderId, riskWarning, riskReasons }, or 403 RISK_BLOCKED.
   router.post("/", (req, res) => handle(res, (paypal) => startCheckout(paypal, classify, req.user!.id, req.body?.listingId), 201));
 
   // POST /api/orders/:id/authorize  (the order's buyer) — after PayPal approval. Returns { order }.

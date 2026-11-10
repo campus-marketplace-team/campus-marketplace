@@ -1,4 +1,4 @@
-import { HANDOFF_WINDOW_MS, RISK_HOLD_WINDOW_MS } from "@campus/shared";
+import { HANDOFF_WINDOW_MS, RISK_HOLD_WINDOW_MS, type RiskHardRule } from "@campus/shared";
 import type { RiskClassification } from "./classifier.js";
 import type { RiskFeatures } from "./features.js";
 
@@ -21,16 +21,7 @@ export const MANY_PAST_DISPUTES = 3;
 export type RiskLevel = RiskClassification["risk"];
 export type RiskOutcome = "NORMAL" | "HOLD_WITH_WARNING" | "BLOCKED";
 
-export type HardRule =
-  | "off_platform_payment"
-  | "very_low_price"
-  | "many_recent_listings"
-  | "many_past_disputes"
-  /** The classifier reported the prompt_injection signal. A fooled classifier won't. */
-  | "prompt_injection"
-  /** Our own phrase detector found injection text, whatever the classifier said. */
-  | "injection_phrase"
-  | "new_seller_off_platform_low_price";
+export type HardRule = RiskHardRule;
 
 export type RiskPolicyDecision = {
   /** Final level: the higher of the floor and the classifier's answer. */

@@ -156,8 +156,23 @@ export type ClaudeUsage = {
   busiestUserCalls: number
 }
 
+/** A listing whose seller wrote an off-platform payment phrase in chat. Phrase ids only, never chat text. */
+export type SellerRedFlag = {
+  listingId: string
+  listingTitle: string
+  listingStatus: string
+  seller: string
+  /** Always "Seller asked for off-platform payment". */
+  flag: string
+  phrases: string[]
+  messages: number
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
 export type AdminDashboard = {
   claudeUsage: ClaudeUsage
+  sellerRedFlags: SellerRedFlag[]
   pendingDisputeDecisions: PendingDisputeDecision[]
   escalatedDisputes: EscalatedDispute[]
   riskDecisions: RiskDecisionRecord[]

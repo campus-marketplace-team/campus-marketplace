@@ -3,7 +3,7 @@ import { type Db, prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import { postTransaction } from "../ledger/postTransaction.js";
 import { type Authorization, type PayPalClient, PayPalError } from "../paypal/client.js";
-import { assessOrderRisk, type Classify, isBlockedForBuyer, latestRiskOutcome } from "../risk/assess.js";
+import { assessOrderRisk, type Classify, isBlockedForBuyer, latestRiskOutcome, latestRiskReasons } from "../risk/assess.js";
 import { handoffWindowMs } from "../risk/policy.js";
 import { StaleOrderError, transition } from "./stateMachine.js";
 
@@ -128,8 +128,10 @@ export async function startCheckout(paypal: PayPalClient, classify: Classify, bu
   }
   if (outcome === "BLOCKED") throw riskBlocked();
   const riskWarning = outcome === "HOLD_WITH_WARNING";
+  // Fixed ids for fixed labels: the classifier's own reasons stay internal.
+  const riskReasons = riskWarning ? await latestRiskReasons(prisma, order.id) : [];
 
-  if (order.paypalOrderId) return { orderId: order.id, paypalOrderId: order.paypalOrderId, riskWarning };
+  if (order.paypalOrderId) return { orderId: order.id, paypalOrderId: order.paypalOrderId, riskWarning, riskReasons };
 
   const created = await paypal
     .createOrder({ orderId: order.id, amountCents: listing.priceCents, currency: listing.currency })
@@ -139,7 +141,7 @@ export async function startCheckout(paypal: PayPalClient, classify: Classify, bu
     where: { id: order.id, paypalOrderId: null },
     data: { paypalOrderId: created.paypalOrderId },
   });
-  return { orderId: order.id, paypalOrderId: created.paypalOrderId, riskWarning };
+  return { orderId: order.id, paypalOrderId: created.paypalOrderId, riskWarning, riskReasons };
 }
 
 /**

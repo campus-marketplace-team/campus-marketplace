@@ -16,6 +16,7 @@ import {
   type DeadLetter,
   fetchAdminDashboard,
   type ReconciliationFlag,
+  type SellerRedFlag,
 } from '../../admin/adminApi'
 import { Button, LoadError, LoadingState } from '../../components'
 import { Page } from '../../layout/Page'
@@ -164,6 +165,18 @@ function Dashboard({
         disputeCounts={data.disputeDecisionCounts}
       />
 
+      <section aria-labelledby="seller-flags-heading">
+        <h2 id="seller-flags-heading" className="admin__heading">
+          Seller red flags{' '}
+          <span className={data.sellerRedFlags.length ? 'admin__count admin__count--alert' : 'admin__count'}>{data.sellerRedFlags.length}</span>
+        </h2>
+        <p className="text-muted admin__hint">
+          Listings whose seller asked for an off-platform payment in their own chat messages, whatever the checkout outcome.
+          Phrase types only, never the message text.
+        </p>
+        <SellerFlagsGrid rows={data.sellerRedFlags} />
+      </section>
+
       <section aria-labelledby="flags-heading">
         <h2 id="flags-heading" className="admin__heading">
           Reconciliation mismatches <span className={data.openFlagCount ? 'admin__count admin__count--alert' : 'admin__count'}>{data.openFlagCount} open</span>
@@ -296,6 +309,35 @@ function FlagsGrid({ rows }: { rows: ReconciliationFlag[] }) {
         defaultColDef={defaultColDef}
         getRowId={(p) => p.data.id}
         overlayNoRowsTemplate="No mismatches: the ledger agrees with PayPal"
+      />
+    </div>
+  )
+}
+
+function SellerFlagsGrid({ rows }: { rows: SellerRedFlag[] }) {
+  const columns = useMemo<ColDef<SellerRedFlag>[]>(
+    () => [
+      { field: 'flag', headerName: 'Flag', width: 290, cellClass: 'admin-grid__alert' },
+      { field: 'listingTitle', headerName: 'Listing', width: 200 },
+      { field: 'seller', headerName: 'Seller', width: 140 },
+      { field: 'listingStatus', headerName: 'Listing status', width: 140 },
+      { field: 'phrases', headerName: 'Phrases', width: 220, valueFormatter: (p) => (p.value as string[] | undefined)?.join(', ') ?? '' },
+      { field: 'messages', headerName: 'Messages', type: 'numericColumn', width: 115 },
+      { field: 'lastSeenAt', headerName: 'Last seen', valueFormatter: dateTime, sort: 'desc', width: 215 },
+      { field: 'firstSeenAt', headerName: 'First seen', valueFormatter: dateTime, width: 215 },
+      { field: 'listingId', headerName: 'Listing id', valueFormatter: shortId, width: 110, tooltipField: 'listingId' },
+    ],
+    [],
+  )
+  return (
+    <div className="admin-grid">
+      <AgGridReact<SellerRedFlag>
+        theme={gridTheme}
+        rowData={rows}
+        columnDefs={columns}
+        defaultColDef={defaultColDef}
+        getRowId={(p) => p.data.listingId}
+        overlayNoRowsTemplate="No seller has asked for off-platform payment"
       />
     </div>
   )

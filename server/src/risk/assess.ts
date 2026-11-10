@@ -1,3 +1,4 @@
+import { buyerRiskReasons, type RiskHardRule } from "@campus/shared";
 import type { ClaudeBudget } from "../ai/claude.js";
 import { type Db, prisma } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
@@ -33,12 +34,15 @@ export async function isBlockedForBuyer(db: Db, buyerId: string, listingId: stri
   return (await db.order.count({ where: { buyerId, listingId, state: "BLOCKED" } })) > 0;
 }
 
-/** The order's latest decision, if it's recent and neither the chat nor the listing has changed since. */
-async function reusableOutcome(order: { id: string; listingId: string; buyerId: string; sellerId: string }, now: Date) {
+/**
+ * The order's latest decision, if a Pay click would reuse it: it's recent and
+ * neither the chat nor the listing has changed since.
+ */
+async function currentDecision(order: { id: string; listingId: string; buyerId: string; sellerId: string }, now: Date) {
   const decision = await prisma.decision.findFirst({
     where: { orderId: order.id, kind: "RISK" },
     orderBy: { createdAt: "desc" },
-    select: { outcome: true, createdAt: true },
+    select: { outcome: true, evidence: true, createdAt: true },
   });
   if (!decision || now.getTime() - decision.createdAt.getTime() > DECISION_REUSE_MS) return null;
 
@@ -46,7 +50,49 @@ async function reusableOutcome(order: { id: string; listingId: string; buyerId: 
     prisma.chatMessage.count({ where: { ...orderChatWhere(order, now), createdAt: { gt: decision.createdAt } } }),
     prisma.listing.count({ where: { id: order.listingId, updatedAt: { gt: decision.createdAt } } }),
   ]);
-  return newMessages === 0 && editedListing === 0 ? (decision.outcome as RiskOutcome) : null;
+  return newMessages === 0 && editedListing === 0 ? decision : null;
+}
+
+/** The hard rules a buyer may see (fixed labels, see @campus/shared) from a decision's saved evidence. */
+function reasonsFrom(evidence: Prisma.JsonValue | null): RiskHardRule[] {
+  const hardRules = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence.hardRules : null;
+  return buyerRiskReasons(hardRules);
+}
+
+/** The buyer-safe reasons behind an order's latest risk decision. */
+export async function latestRiskReasons(db: Db, orderId: string): Promise<RiskHardRule[]> {
+  const decision = await db.decision.findFirst({
+    where: { orderId, kind: "RISK" },
+    orderBy: { createdAt: "desc" },
+    select: { evidence: true },
+  });
+  return reasonsFrom(decision?.evidence ?? null);
+}
+
+export type BuyerRiskStatus = { outcome: RiskOutcome | null; reasons: RiskHardRule[] };
+
+/**
+ * What the listing page shows this buyer before they pay. A block sticks (see
+ * isBlockedForBuyer), so it's shown whatever happened since. A warning is shown
+ * only while it still matches the chat and listing, i.e. while a Pay click would
+ * reuse it; otherwise null, and the next Pay click assesses again.
+ */
+export async function buyerRiskStatus(buyerId: string, listingId: string, now = new Date()): Promise<BuyerRiskStatus> {
+  const blocked = await prisma.order.findFirst({
+    where: { buyerId, listingId, state: "BLOCKED" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (blocked) return { outcome: "BLOCKED", reasons: await latestRiskReasons(prisma, blocked.id) };
+
+  const open = await prisma.order.findFirst({
+    where: { buyerId, listingId, state: "CREATED" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, listingId: true, buyerId: true, sellerId: true },
+  });
+  const decision = open ? await currentDecision(open, now) : null;
+  if (!decision) return { outcome: null, reasons: [] };
+  return { outcome: decision.outcome as RiskOutcome, reasons: reasonsFrom(decision.evidence) };
 }
 
 /**
@@ -60,8 +106,8 @@ export async function assessOrderRisk(orderId: string, { classify, now = new Dat
     where: { id: orderId },
     select: { id: true, listingId: true, buyerId: true, sellerId: true, version: true },
   });
-  const reusable = await reusableOutcome(order, now);
-  if (reusable) return reusable;
+  const reusable = await currentDecision(order, now);
+  if (reusable) return reusable.outcome as RiskOutcome;
 
   const input = await loadRiskInput(prisma, orderId, now);
   // Charged to the buyer, whose click on Pay caused the call.

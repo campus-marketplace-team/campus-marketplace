@@ -298,3 +298,80 @@ describe("GET /api/orders/:id riskWarning", () => {
     expect(res.body.order.riskWarning).toBe(false);
   });
 });
+
+describe("buyer-facing risk reasons", () => {
+  const riskStatus = (listingId: string) => api.call("GET", `/orders/risk?listingId=${listingId}`, { token: buyerToken });
+  const say = (listingId: string, from: string, to: string, body: string, ago = 60_000) =>
+    prisma.chatMessage.create({ data: { listingId, senderId: from, recipientId: to, body, createdAt: new Date(Date.now() - ago) } });
+
+  it("a warning carries only fixed hard-rule ids, never the classifier's reasons or chat text", async () => {
+    classify.mockResolvedValue({ ...answer("low"), reasons: ["SECRET-REASON"], signals: ["prompt_injection"] });
+    const listing = await createListing();
+    await say(listing.id, sellerId, buyerId, "SECRET-CHAT just e-transfer me");
+    const res = await start(listing.id);
+
+    expect(res.body.riskWarning).toBe(true);
+    // prompt_injection fired too, but it comes from the classifier, so it has no buyer label.
+    expect(res.body.riskReasons).toEqual(["off_platform_payment"]);
+    expect(JSON.stringify(res.body)).not.toMatch(/SECRET/);
+
+    const status = await riskStatus(listing.id);
+    expect(status.body).toEqual({ outcome: "HOLD_WITH_WARNING", reasons: ["off_platform_payment"] });
+  });
+
+  it("GET /orders/risk: nothing before checkout, needs a login and a listing id", async () => {
+    const listing = await createListing();
+    expect((await riskStatus(listing.id)).body).toEqual({ outcome: null, reasons: [] });
+    expect((await api.call("GET", `/orders/risk?listingId=${listing.id}`)).status).toBe(401);
+    expect((await api.call("GET", "/orders/risk?listingId=nope", { token: buyerToken })).status).toBe(400);
+  });
+
+  it("a warning is cleared once a new chat message arrives, and the next Pay click assesses again", async () => {
+    const listing = await createListing();
+    await say(listing.id, sellerId, buyerId, "pay me on venmo", 120_000);
+    const first = await start(listing.id);
+    expect(first.body.riskWarning).toBe(true);
+    expect((await riskStatus(listing.id)).body.outcome).toBe("HOLD_WITH_WARNING");
+
+    await prisma.chatMessage.create({ data: { listingId: listing.id, senderId: buyerId, recipientId: sellerId, body: "sure" } });
+    expect((await riskStatus(listing.id)).body).toEqual({ outcome: null, reasons: [] });
+
+    const again = await start(listing.id);
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(again.body.riskWarning).toBe(true);
+    expect((await riskStatus(listing.id)).body.outcome).toBe("HOLD_WITH_WARNING");
+  });
+
+  it("a warning is cleared when the listing is edited", async () => {
+    classify.mockResolvedValue(answer("medium"));
+    const listing = await createListing();
+    await start(listing.id);
+    expect((await riskStatus(listing.id)).body.outcome).toBe("HOLD_WITH_WARNING");
+    await prisma.listing.update({ where: { id: listing.id }, data: { description: "edited" } });
+    expect((await riskStatus(listing.id)).body.outcome).toBeNull();
+  });
+
+  it("a block sticks, with its reasons, even after new chat", async () => {
+    const seller = await createTestUser("risk-new-seller");
+    // A brand-new seller, an off-platform ask and a very low price: the hard rule that blocks.
+    // In a currency nothing else uses, so the shared database's listings can't move the median.
+    for (let i = 0; i < 3; i++) {
+      await prisma.listing.create({
+        data: { sellerId, title: "comparable", description: "test", category: "ELECTRONICS", priceCents: 40000, currency: "SEK", createdAt: new Date(Date.now() - 2 * DAY_MS) },
+      });
+    }
+    const listing = await prisma.listing.create({
+      data: { sellerId: seller.id, title: "cheap", description: "test", category: "ELECTRONICS", priceCents: 5000, currency: "SEK" },
+    });
+    await say(listing.id, seller.id, buyerId, "e-transfer only please");
+    const res = await start(listing.id);
+    expect(res.body.code).toBe("RISK_BLOCKED");
+
+    const status = await riskStatus(listing.id);
+    expect(status.body.outcome).toBe("BLOCKED");
+    expect(status.body.reasons).toContain("new_seller_off_platform_low_price");
+
+    await prisma.chatMessage.create({ data: { listingId: listing.id, senderId: buyerId, recipientId: seller.id, body: "hello?" } });
+    expect((await riskStatus(listing.id)).body.outcome).toBe("BLOCKED");
+  });
+});

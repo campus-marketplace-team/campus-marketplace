@@ -1,4 +1,4 @@
-import type { DisputeReason } from '@campus/shared'
+import type { DisputeReason, RiskHardRule } from '@campus/shared'
 import { api } from '../api/client'
 import type { CheckoutOrder } from '../checkout/checkoutApi'
 
@@ -12,6 +12,8 @@ export type OrderStatus = CheckoutOrder & {
   seller: { displayName: string }
   /** Single-order view only, and only for the buyer. */
   riskWarning?: boolean
+  /** Hard rules behind the warning, shown with their fixed labels. */
+  riskReasons?: RiskHardRule[]
   /** Single-order view only. Null if no problem was reported. */
   dispute?: OrderDispute | null
 }
