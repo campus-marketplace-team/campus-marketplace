@@ -8,7 +8,7 @@
 // word must be how Pixabay tags the item (e.g. "sweatshirt", not "hoodie").
 // When search can't find a good product shot, pixabayId pins one image.
 
-import type { ListingCategory, ListingStatus } from "../src/generated/prisma/client.js";
+import type { ListingCategory, ListingStatus, OrderState } from "../src/generated/prisma/client.js";
 
 export type SeedListing = {
   title: string;
@@ -28,15 +28,53 @@ export type SeedListing = {
 export const seedPhotoPath = (slug: string) => `/images/${slug}.webp`;
 
 /**
- * What re-running the seed does to a seed listing, given its current status
- * (null if it doesn't exist yet). Only a listing still for sale is refreshed:
- * a reserved, sold or removed one belongs to an order (or its seller) now, and
- * resetting it would put a sold item back on sale or change what a dispute
- * shows was sold.
+ * Order states that still hold the listing: money is held or moving, a dispute
+ * is open, or the buyer is in PayPal right now (CREATED with a PayPal order).
+ * The rest (PAID_OUT, VOIDED, REFUNDED, PARTIAL_REFUND, RELEASED, BLOCKED, and
+ * CREATED without a PayPal order) are finished or never started.
  */
-export function seedListingAction(currentStatus: ListingStatus | null): "create" | "update" | "keep" {
-  if (currentStatus === null) return "create";
-  return currentStatus === "ACTIVE" ? "update" : "keep";
+export const ACTIVE_ORDER_STATES = [
+  "AUTHORIZED",
+  "IN_DISPUTE",
+  "ESCALATED",
+  "CAPTURED",
+  "PAYOUT_PENDING",
+  "PAYOUT_RETRY",
+] as const satisfies readonly OrderState[];
+
+export type SeedListingOrder = { id: string; state: OrderState; paypalOrderId: string | null };
+
+/** Whether this order still holds its listing (see ACTIVE_ORDER_STATES). */
+export function isActiveOrder(order: Pick<SeedListingOrder, "state" | "paypalOrderId">): boolean {
+  if (order.state === "CREATED") return order.paypalOrderId !== null;
+  return (ACTIVE_ORDER_STATES as readonly OrderState[]).includes(order.state);
+}
+
+export type SeedListingAction =
+  | { kind: "create" }
+  | { kind: "update" } // still for sale: refresh its data
+  | { kind: "reset" } // back to ACTIVE with fresh data
+  | { kind: "skip"; reason: "OTHER_SELLER" }
+  | { kind: "skip"; reason: "ACTIVE_ORDER"; order: { id: string; state: OrderState } };
+
+/**
+ * What re-running the seed does to a seed listing, given its current row (null
+ * if it doesn't exist yet), the ids of the seed users, and every order on it.
+ * A listing someone else now sells is never touched. A reserved, sold or
+ * removed one goes back on sale only once none of its orders is active;
+ * otherwise the first active order is reported as what blocked it.
+ */
+export function seedListingAction(
+  current: { status: ListingStatus; sellerId: string } | null,
+  seedUserIds: readonly string[],
+  orders: readonly SeedListingOrder[],
+): SeedListingAction {
+  if (current === null) return { kind: "create" };
+  if (!seedUserIds.includes(current.sellerId)) return { kind: "skip", reason: "OTHER_SELLER" };
+  if (current.status === "ACTIVE") return { kind: "update" };
+  const blocking = orders.find(isActiveOrder);
+  if (blocking) return { kind: "skip", reason: "ACTIVE_ORDER", order: { id: blocking.id, state: blocking.state } };
+  return { kind: "reset" };
 }
 
 export const SEED_LISTINGS: SeedListing[] = [

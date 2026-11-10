@@ -1,11 +1,16 @@
 // Dev seed: 5 verified test users and 21 listings across several categories
 // (prisma/seedListings.ts). Listing photos are client/public/images/<slug>.webp,
 // fetched once with scripts/fetchListingImages.ts.
+// Re-running it puts a reserved, sold or removed seed listing (ids 201+) back
+// on sale once none of its orders is active (see seedListingAction). It never
+// touches demo listings (3xx), other users' listings, orders, ledger entries
+// or decisions.
 // Run: npm run seed -w server 
 
 import { prisma } from "../src/db.js";
 import { hashPassword } from "../src/auth/password.js";
-import { SEED_LISTINGS, seedListingAction, seedPhotoPath } from "./seedListings.js";
+import type { ListingCategory, ListingStatus, Prisma } from "../src/generated/prisma/client.js";
+import { SEED_LISTINGS, seedListingAction, seedPhotoPath, type SeedListingOrder } from "./seedListings.js";
 
 // Dev-only login for every seed user. Never use seed accounts with real money.
 const SEED_PASSWORD = "password123";
@@ -24,6 +29,36 @@ const users: SeedUser[] = [
   { id: seedId(105), email: `seed.marcus.lee@${SCHOOL_DOMAIN}`, displayName: "Marcus Lee" },
 ];
 
+type SeedListingData = {
+  sellerId: string;
+  title: string;
+  description: string;
+  category: ListingCategory;
+  priceCents: number;
+  photoUrls: string[];
+};
+
+/**
+ * Creates, refreshes or resets one seed listing in the caller's transaction.
+ * The listing row and its orders are locked first, so no checkout can start
+ * (a new order or authorize waits on the listing row, a PayPal order or state
+ * change waits on the order row) between the check and the write.
+ */
+async function seedOneListing(tx: Prisma.TransactionClient, id: string, data: SeedListingData, seedUserIds: string[]) {
+  const [current] = await tx.$queryRaw<{ status: ListingStatus; sellerId: string }[]>`
+    SELECT "status", "seller_id"::text AS "sellerId" FROM "listings" WHERE "id" = ${id}::uuid FOR UPDATE`;
+  const orders = await tx.$queryRaw<SeedListingOrder[]>`
+    SELECT "id"::text AS "id", "state", "paypal_order_id" AS "paypalOrderId"
+    FROM "orders" WHERE "listing_id" = ${id}::uuid
+    ORDER BY "created_at"
+    FOR UPDATE`;
+  const action = seedListingAction(current ?? null, seedUserIds, orders);
+  if (action.kind === "create") await tx.listing.create({ data: { id, ...data, status: "ACTIVE" } });
+  else if (action.kind === "update") await tx.listing.update({ where: { id }, data });
+  else if (action.kind === "reset") await tx.listing.update({ where: { id }, data: { ...data, status: "ACTIVE" } });
+  return action;
+}
+
 async function main() {
   const now = new Date();
   const passwordHash = await hashPassword(SEED_PASSWORD);
@@ -33,7 +68,9 @@ async function main() {
     await prisma.user.upsert({ where: { id: u.id }, create: { id: u.id, ...data }, update: data });
   }
 
-  const kept: string[] = [];
+  const seedUserIds = users.map((u) => u.id);
+  const reset: string[] = [];
+  const skipped: string[] = [];
   for (const [i, l] of SEED_LISTINGS.entries()) {
     const id = seedId(201 + i);
     const data = {
@@ -44,20 +81,18 @@ async function main() {
       priceCents: l.priceCents,
       photoUrls: [seedPhotoPath(l.slug)],
     };
-    const existing = await prisma.listing.findUnique({ where: { id }, select: { status: true } });
-    const action = seedListingAction(existing?.status ?? null);
-    if (action === "create") {
-      await prisma.listing.create({ data: { id, ...data, status: "ACTIVE" } });
-    } else if (action === "update") {
-      // Only while still for sale: an order may reserve it between the read and this write.
-      await prisma.listing.updateMany({ where: { id, status: "ACTIVE" }, data });
-    } else {
-      kept.push(`${l.title} (${existing!.status})`);
+    const action = await prisma.$transaction((tx) => seedOneListing(tx, id, data, seedUserIds));
+    if (action.kind === "reset") reset.push(l.title);
+    else if (action.kind === "skip" && action.reason === "OTHER_SELLER") {
+      skipped.push(`${l.title} [${id}]: now sold by another user`);
+    } else if (action.kind === "skip") {
+      skipped.push(`${l.title} [${id}]: order ${action.order.id} is ${action.order.state}`);
     }
   }
 
   console.log(`Seeded ${users.length} users and ${SEED_LISTINGS.length} listings.`);
-  if (kept.length) console.log(`Left alone because they're no longer for sale: ${kept.join(", ")}.`);
+  if (reset.length) console.log(`Reset to ACTIVE (${reset.length}):\n  ${reset.join("\n  ")}`);
+  if (skipped.length) console.log(`Skipped (${skipped.length}):\n  ${skipped.join("\n  ")}`);
   console.log(`Seed users log in with password "${SEED_PASSWORD}".`);
 }
 
