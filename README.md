@@ -247,3 +247,7 @@ docs/     Architecture diagram and payment-model tradeoff
 ## Credits
 
 Listing photos from [Pixabay](https://pixabay.com/).
+
+## License
+
+[MIT](LICENSE)

@@ -30,7 +30,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.5.0",

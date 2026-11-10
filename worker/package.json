@@ -1,5 +1,6 @@
 ﻿{
   "name": "worker",
+  "license": "MIT",
   "version": "1.0.0",
   "private": true,
   "type": "module",

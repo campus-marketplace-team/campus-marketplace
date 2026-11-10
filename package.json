@@ -1,5 +1,6 @@
 {
   "name": "campus-marketplace",
+  "license": "MIT",
   "private": true,
   "engines": {
     "node": ">=24"
