@@ -81,7 +81,15 @@ function authorization(overrides: Partial<Authorization> = {}): Authorization {
   };
 }
 
+/** "Check & buy" (the risk check), which createOrder's POST /orders needs first. */
+async function assess(listingId: string) {
+  const res = await api.call("POST", "/orders/assess", { token: buyerToken, json: { listingId } });
+  expect(res.status).toBe(200);
+  return res.body;
+}
+
 async function startCheckout(listingId: string) {
+  await assess(listingId);
   const res = await api.call("POST", "/orders", { token: buyerToken, json: { listingId } });
   expect(res.status).toBe(201);
   return res.body as { orderId: string; paypalOrderId: string };
@@ -120,6 +128,7 @@ describe("POST /api/orders (start checkout)", () => {
   it("answers 503 when PayPal is down, and the retry reuses the same order", async () => {
     const listing = await createListing();
     paypal.createOrder.mockRejectedValueOnce(new PayPalError("create-order", "timeout", "no response"));
+    await assess(listing.id);
     const failed = await api.call("POST", "/orders", { token: buyerToken, json: { listingId: listing.id } });
     expect(failed.status).toBe(503);
     expect(failed.body.code).toBe("PAYPAL_UNAVAILABLE");
@@ -175,8 +184,11 @@ describe("POST /api/orders/:id/authorize (failure paths)", () => {
     const listing = await createListing();
     const { orderId } = await startCheckout(listing.id);
     const auth = authorization();
-    paypal.authorizeOrder.mockResolvedValueOnce(auth);
-    await prisma.listing.update({ where: { id: listing.id }, data: { status: "RESERVED" } });
+    // Reserved while PayPal was authorizing. (Before authorize, the listing change would make the risk check stale.)
+    paypal.authorizeOrder.mockImplementationOnce(async () => {
+      await prisma.listing.update({ where: { id: listing.id }, data: { status: "RESERVED" } });
+      return auth;
+    });
 
     const res = await api.call("POST", `/orders/${orderId}/authorize`, { token: buyerToken });
     expect(res.status).toBe(409);

@@ -19,6 +19,8 @@ export const DEFAULT_RATE_LIMITS = {
   authIp: { max: 50, windowMs: 15 * MINUTE },
   signup: { max: 20, windowMs: 15 * MINUTE },
   checkout: { max: 10, windowMs: 60 * MINUTE },
+  /** "Check & buy", which can cost a Claude call: as strict as checkout, counted apart so checking doesn't use up paying. */
+  riskCheck: { max: 10, windowMs: 60 * MINUTE },
   reportProblem: { max: 5, windowMs: 60 * MINUTE },
   chatSend: { max: 30, windowMs: MINUTE },
   /** The nav badge's poll (every 30 s plus tab focus), kept out of `general` so it never crowds out chat polling. */
@@ -34,14 +36,16 @@ export type RateLimits = Record<keyof typeof DEFAULT_RATE_LIMITS, RateLimitRule>
 const LOGIN_OR_RESEND_ROUTE = /^\/auth\/(login|resend-verification)\/?$/i;
 const SIGNUP_ROUTE = /^\/auth\/signup\/?$/i;
 const CHECKOUT_ROUTE = /^\/orders\/?$/i;
+const RISK_CHECK_ROUTE = /^\/orders\/assess\/?$/i;
 const REPORT_PROBLEM_ROUTE = /^\/orders\/[^/]+\/dispute\/?$/i;
 const CHAT_SEND_ROUTE = /^\/chats\/[^/]+\/messages\/?$/i;
 const CHAT_UNREAD_ROUTE = /^\/chats\/unread-count\/?$/i;
 
-function perUserBucket({ method, path }: Request): "checkout" | "reportProblem" | "chatSend" | "chatUnread" | null {
+function perUserBucket({ method, path }: Request): "checkout" | "riskCheck" | "reportProblem" | "chatSend" | "chatUnread" | null {
   if (method === "GET" && CHAT_UNREAD_ROUTE.test(path)) return "chatUnread";
   if (method !== "POST") return null;
   if (CHECKOUT_ROUTE.test(path)) return "checkout";
+  if (RISK_CHECK_ROUTE.test(path)) return "riskCheck";
   if (REPORT_PROBLEM_ROUTE.test(path)) return "reportProblem";
   if (CHAT_SEND_ROUTE.test(path)) return "chatSend";
   return null;
@@ -81,6 +85,7 @@ export function createRateLimiters(overrides: Partial<RateLimits> = {}): { befor
     authIp: limiter(rules.authIp),
     signup: limiter(rules.signup),
     checkout: limiter(rules.checkout),
+    riskCheck: limiter(rules.riskCheck),
     reportProblem: limiter(rules.reportProblem),
     chatSend: limiter(rules.chatSend),
     chatUnread: limiter(rules.chatUnread),

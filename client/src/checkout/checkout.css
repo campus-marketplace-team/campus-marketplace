@@ -18,3 +18,23 @@
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;
 }
+
+.checkout__check {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.checkout__ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.checkout__ack input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}

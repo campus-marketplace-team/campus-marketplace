@@ -23,7 +23,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hashPassword } from "../src/auth/password.js";
 import { prisma } from "../src/db.js";
-import { authorizeCheckout, CheckoutError, startCheckout } from "../src/orders/checkout.js";
+import { assessCheckout, authorizeCheckout, CheckoutError, startCheckout } from "../src/orders/checkout.js";
 import { openDispute } from "../src/orders/dispute.js";
 import { issueHandoffToken, redeemHandoffToken } from "../src/orders/handoff.js";
 import { DISPUTE_PHOTO_GRACE_MS } from "../src/outbox/handlers.js";
@@ -156,13 +156,10 @@ async function runScam() {
   }
 
   await ensureChat(scenario, p);
-  try {
-    const { riskWarning } = await startCheckout(getPayPalClient(), classify, p.buyerId, scenario.listing.id);
-    throw new Error(
-      `The scam checkout wasn't blocked (${riskWarning ? "warning only" : "normal"}). A PayPal order was created but nothing was approved or held; it expires on its own.`,
-    );
-  } catch (err) {
-    if (!(err instanceof CheckoutError) || err.code !== "RISK_BLOCKED") throw err;
+  // Only the "Check & buy" step: a block means PayPal is never called.
+  const { outcome } = await assessCheckout(classify, p.buyerId, scenario.listing.id);
+  if (outcome !== "BLOCKED") {
+    throw new Error(`The scam checkout wasn't blocked (${outcome}). No PayPal order was created.`);
   }
   const decision = await prisma.decision.findFirst({
     where: { kind: "RISK", listingId: scenario.listing.id, order: { buyerId: p.buyerId } },
@@ -207,8 +204,10 @@ async function prepare(key: "sale" | "dispute", paypal: PayPalClient): Promise<P
   }
 
   await ensureChat(scenario, p);
-  // Reuses an unpaid CREATED order (and its PayPal order) if there is one.
-  const { orderId, paypalOrderId, riskWarning } = await startCheckout(paypal, classify, p.buyerId, scenario.listing.id);
+  // Both checkout steps, as the listing page does them. Reuses an unpaid CREATED order (and its PayPal order) if there is one.
+  const { outcome } = await assessCheckout(classify, p.buyerId, scenario.listing.id);
+  if (outcome === "BLOCKED") throw new Error(`The ${key} checkout was blocked by the risk check.`);
+  const { orderId, paypalOrderId, riskWarning } = await startCheckout(paypal, p.buyerId, scenario.listing.id);
   console.log(`  Order ${orderId}: risk check passed${riskWarning ? " with a warning (longer hold)" : ""}, PayPal order ${paypalOrderId}.`);
   return { key, scenario, parties: p, orderId, paypalOrderId };
 }

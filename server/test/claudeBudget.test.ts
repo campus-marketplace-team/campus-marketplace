@@ -315,6 +315,8 @@ describe("checkout with the budget used up", () => {
       select: { id: true },
     });
 
+    const check = await api.call("POST", "/orders/assess", { token, json: { listingId: listing.id } });
+    expect(check.body).toEqual({ outcome: "HOLD_WITH_WARNING", reasons: [] });
     const res = await api.call("POST", "/orders", { token, json: { listingId: listing.id } });
 
     expect(res.status).toBe(201);

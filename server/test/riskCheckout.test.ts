@@ -54,11 +54,19 @@ function createListing() {
   });
 }
 
-const start = (listingId: string) => api.call("POST", "/orders", { token: buyerToken, json: { listingId } });
+const assess = (listingId: string, token = buyerToken) => api.call("POST", "/orders/assess", { token, json: { listingId } });
+const createOrder = (listingId: string, token = buyerToken) => api.call("POST", "/orders", { token, json: { listingId } });
+
+/** Both checkout steps, as the client does them: "Check & buy", then createOrder. Returns the first failure, else createOrder's answer. */
+async function start(listingId: string, token = buyerToken) {
+  const check = await assess(listingId, token);
+  if (check.status !== 200) return check;
+  return createOrder(listingId, token);
+}
 
 const decisionsFor = (orderId: string) => prisma.decision.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
 
-describe("risk check on POST /api/orders", () => {
+describe("risk check before checkout", () => {
   it("low risk: carries on to PayPal with no warning, and saves the decision", async () => {
     const listing = await createListing();
     const res = await start(listing.id);
@@ -155,14 +163,17 @@ describe("risk check on POST /api/orders", () => {
     await start(listing.id);
 
     const other = await createTestUser("risk-other");
-    const res = await api.call("POST", "/orders", { token: await login(api, other.email), json: { listingId: listing.id } });
+    const res = await start(listing.id, await login(api, other.email));
     expect(res.status).toBe(201);
   });
 
   it("an unexpected failure stops checkout before PayPal", async () => {
     classify.mockRejectedValueOnce(new Error("unexpected"));
-    const res = await start((await createListing()).id);
-    expect(res.status).toBe(500);
+    const listing = await createListing();
+    expect((await assess(listing.id)).status).toBe(500);
+    const res = await createOrder(listing.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NOT_ASSESSED");
     expect(paypal.createOrder).not.toHaveBeenCalled();
   });
 
@@ -218,6 +229,123 @@ describe("risk check on POST /api/orders", () => {
       await start(listingId);
       expect(classify).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("two-step checkout: POST /orders/assess, then POST /orders", () => {
+  /** Backdates the listing's decisions, so a write made now lands clearly after them. */
+  const backdateDecisions = (listingId: string, ms = 60_000) =>
+    prisma.decision.updateMany({ where: { listingId }, data: { createdAt: new Date(Date.now() - ms) } });
+
+  it("assess returns the outcome and buyer-safe reasons, and needs a login", async () => {
+    classify.mockResolvedValue({ ...answer("low"), reasons: ["SECRET-REASON"] });
+    const listing = await createListing();
+    await prisma.chatMessage.create({
+      data: { listingId: listing.id, senderId: sellerId, recipientId: buyerId, body: "SECRET-CHAT venmo me", createdAt: new Date(Date.now() - 60_000) },
+    });
+
+    const res = await assess(listing.id);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ outcome: "HOLD_WITH_WARNING", reasons: ["off_platform_payment"] });
+    expect(JSON.stringify(res.body)).not.toMatch(/SECRET/);
+    expect(paypal.createOrder).not.toHaveBeenCalled();
+    expect((await api.call("POST", "/orders/assess", { json: { listingId: listing.id } })).status).toBe(401);
+  });
+
+  it("createOrder with no decision is refused, and never calls the classifier or PayPal", async () => {
+    const listing = await createListing();
+    const res = await createOrder(listing.id);
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NOT_ASSESSED");
+    expect(classify).not.toHaveBeenCalled();
+    expect(paypal.createOrder).not.toHaveBeenCalled();
+    expect(await prisma.order.count({ where: { listingId: listing.id } })).toBe(0);
+  });
+
+  it("createOrder after a BLOCKED check is refused without PayPal or a second classifier call", async () => {
+    classify.mockResolvedValue(answer("high"));
+    const listing = await createListing();
+    expect((await assess(listing.id)).body.outcome).toBe("BLOCKED");
+
+    const res = await createOrder(listing.id);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("RISK_BLOCKED");
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(paypal.createOrder).not.toHaveBeenCalled();
+    // Checking again shows the block without another classifier call.
+    expect((await assess(listing.id)).body.outcome).toBe("BLOCKED");
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["low", "medium"] as const)("createOrder reuses the %s-risk decision with no new classifier call", async (risk) => {
+    classify.mockResolvedValue(answer(risk));
+    const listing = await createListing();
+    expect((await assess(listing.id)).body.outcome).toBe(risk === "low" ? "NORMAL" : "HOLD_WITH_WARNING");
+    expect(classify).toHaveBeenCalledTimes(1);
+
+    const res = await createOrder(listing.id);
+    expect(res.status).toBe(201);
+    expect(res.body.riskWarning).toBe(risk === "medium");
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(paypal.createOrder).toHaveBeenCalledTimes(1);
+    expect(await decisionsFor(res.body.orderId)).toHaveLength(1);
+  });
+
+  it("checking again with nothing changed reuses the decision", async () => {
+    const listing = await createListing();
+    await assess(listing.id);
+    await assess(listing.id);
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it("a chat message after the check makes createOrder refuse rather than reassess", async () => {
+    const listing = await createListing();
+    await assess(listing.id);
+    await backdateDecisions(listing.id);
+    await prisma.chatMessage.create({ data: { listingId: listing.id, senderId: sellerId, recipientId: buyerId, body: "hi" } });
+
+    const res = await createOrder(listing.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NOT_ASSESSED");
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(paypal.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("a listing edit after the check makes createOrder refuse", async () => {
+    const listing = await createListing();
+    await assess(listing.id);
+    await backdateDecisions(listing.id);
+    await prisma.listing.update({ where: { id: listing.id }, data: { description: "edited" } });
+
+    expect((await createOrder(listing.id)).body.code).toBe("NOT_ASSESSED");
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it("an expired decision makes createOrder refuse", async () => {
+    const listing = await createListing();
+    await assess(listing.id);
+    await backdateDecisions(listing.id, DECISION_REUSE_MS + 60_000);
+    expect((await createOrder(listing.id)).body.code).toBe("NOT_ASSESSED");
+  });
+
+  it("authorize refuses once the decision is stale, without calling PayPal", async () => {
+    const listing = await createListing();
+    const { body } = await start(listing.id);
+    await backdateDecisions(listing.id);
+    await prisma.chatMessage.create({ data: { listingId: listing.id, senderId: sellerId, recipientId: buyerId, body: "e-transfer instead?" } });
+
+    const res = await api.call("POST", `/orders/${body.orderId}/authorize`, { token: buyerToken });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NOT_ASSESSED");
+    expect(paypal.authorizeOrder).not.toHaveBeenCalled();
+  });
+
+  it("assess refuses the seller's own listing and a bad id", async () => {
+    const listing = await createListing();
+    expect((await assess(listing.id, sellerToken)).status).toBe(403);
+    expect((await assess("nope")).status).toBe(404);
+    expect(classify).not.toHaveBeenCalled();
   });
 });
 

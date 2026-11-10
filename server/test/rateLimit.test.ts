@@ -65,6 +65,7 @@ describe("rate limits", () => {
       authIp: { max: 50, windowMs: 15 * MINUTE },
       signup: { max: 20, windowMs: 15 * MINUTE },
       checkout: { max: 10, windowMs: 60 * MINUTE },
+      riskCheck: { max: 10, windowMs: 60 * MINUTE },
       reportProblem: { max: 5, windowMs: 60 * MINUTE },
       chatSend: { max: 30, windowMs: MINUTE },
       chatUnread: { max: 120, windowMs: 15 * MINUTE },
@@ -200,6 +201,18 @@ describe("rate limits", () => {
     expect((await post(tokenB, "203.0.113.1")).status).not.toBe(429);
     // Reading orders isn't checkout.
     expect((await send(api, "GET", "/orders", { token: tokenA })).status).toBe(200);
+  });
+
+  it("limits Check & buy per user, apart from checkout", async () => {
+    const api = await start({ riskCheck: 1, checkout: 1000, general: 1000 });
+    const assess = (token: string, path = "/orders/assess") => send(api, "POST", path, { token, json: { listingId: LISTING } });
+
+    expect((await assess(tokenA)).status).not.toBe(429);
+    expect((await assess(tokenA)).status).toBe(429);
+    expect((await assess(tokenA, "/Orders/Assess/")).status).toBe(429);
+    expect((await assess(tokenB)).status).not.toBe(429);
+    // Paying has its own count.
+    expect((await send(api, "POST", "/orders", { token: tokenA, json: { listingId: LISTING } })).status).not.toBe(429);
   });
 
   it("limits report a problem per user, but not adding photos to the report", async () => {

@@ -1,17 +1,28 @@
-import { AUTHORIZATION_VALID_DAYS, HONOR_PERIOD_MS, platformFeeCents } from "@campus/shared";
+import { AUTHORIZATION_VALID_DAYS, HONOR_PERIOD_MS, platformFeeCents, type RiskHardRule } from "@campus/shared";
 import { type Db, prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import { postTransaction } from "../ledger/postTransaction.js";
 import { type Authorization, type PayPalClient, PayPalError } from "../paypal/client.js";
-import { assessOrderRisk, type Classify, isBlockedForBuyer, latestRiskOutcome, latestRiskReasons } from "../risk/assess.js";
-import { handoffWindowMs } from "../risk/policy.js";
+import {
+  assessOrderRisk,
+  buyerRiskStatus,
+  type Classify,
+  currentRiskDecision,
+  isBlockedForBuyer,
+  latestRiskOutcome,
+  latestRiskReasons,
+  reasonsFrom,
+} from "../risk/assess.js";
+import { handoffWindowMs, type RiskOutcome } from "../risk/policy.js";
 import { StaleOrderError, transition } from "./stateMachine.js";
 
 // Checkout (see CLAUDE.md "Payment model"):
-//   1. startCheckout: our order (CREATED), a risk decision (which can block the
-//      order here), then a PayPal order with intent AUTHORIZE.
-//   2. The buyer approves in the PayPal popup.
-//   3. authorizeCheckout: PayPal authorizes (funds held, not taken), then ONE DB
+//   1. assessCheckout ("Check & buy"): our order (CREATED) and a risk decision,
+//      which can block the order here. The buyer sees the result before PayPal opens.
+//   2. startCheckout (the Buttons' createOrder): a PayPal order with intent
+//      AUTHORIZE, only against a current, unblocked decision from step 1.
+//   3. The buyer approves in the PayPal popup.
+//   4. authorizeCheckout: PayPal authorizes (funds held, not taken), then ONE DB
 //      transaction reserves the listing, moves the order to AUTHORIZED with a
 //      handoff deadline set by the risk decision, and posts escrow_held / buyer_funds.
 //
@@ -62,6 +73,11 @@ function riskBlocked() {
   return new CheckoutError(403, "RISK_BLOCKED", "This order was blocked by our safety checks. You haven't been charged.");
 }
 
+/** No current risk decision: the client shows "Check & buy" again. */
+function notAssessed() {
+  return new CheckoutError(409, "NOT_ASSESSED", "Something changed since your safety check. Please check again before paying.");
+}
+
 /** Voids an authorization we can't use. Failures are logged; the handoff deadline sweeper is the backstop. */
 async function voidQuietly(paypal: PayPalClient, orderId: string, authorizationId: string) {
   try {
@@ -71,12 +87,8 @@ async function voidQuietly(paypal: PayPalClient, orderId: string, authorizationI
   }
 }
 
-/**
- * Creates (or reuses) the buyer's CREATED order for this listing, assesses its
- * risk, and creates its PayPal order unless it's blocked. Returns the PayPal
- * order id for the Buttons' createOrder and whether to warn the buyer.
- */
-export async function startCheckout(paypal: PayPalClient, classify: Classify, buyerId: string, listingId: unknown) {
+/** The listing, if this buyer may buy it right now. */
+async function buyableListing(buyerId: string, listingId: unknown) {
   const listing = isUuid(listingId)
     ? await prisma.listing.findUnique({
         where: { id: listingId },
@@ -88,24 +100,40 @@ export async function startCheckout(paypal: PayPalClient, classify: Classify, bu
   if (listing.status !== "ACTIVE") {
     throw new CheckoutError(409, "LISTING_UNAVAILABLE", "This listing isn't available anymore");
   }
-  if (await isBlockedForBuyer(prisma, buyerId, listing.id)) throw riskBlocked();
+  return listing;
+}
 
-  // Reuse an unpaid order at the current price, so clicking Pay twice doesn't
-  // pile up orders. A price change since then gets a fresh order (and a fresh
-  // PayPal request id, so PayPal can't answer with the old amount).
-  const existing = await prisma.order.findFirst({
-    where: {
-      listingId: listing.id,
-      buyerId,
-      state: "CREATED",
-      amountCents: listing.priceCents,
-      currency: listing.currency,
-    },
+type BuyableListing = Awaited<ReturnType<typeof buyableListing>>;
+
+/**
+ * The buyer's unpaid order at the listing's current price. A price change since
+ * then gets a fresh order (and a fresh PayPal request id, so PayPal can't answer
+ * with the old amount).
+ */
+function openOrder(buyerId: string, listing: BuyableListing) {
+  return prisma.order.findFirst({
+    where: { listingId: listing.id, buyerId, state: "CREATED", amountCents: listing.priceCents, currency: listing.currency },
     orderBy: { createdAt: "desc" },
-    select: { id: true, paypalOrderId: true },
+    select: { id: true, listingId: true, buyerId: true, sellerId: true, paypalOrderId: true },
   });
+}
+
+export type CheckoutAssessment = { outcome: RiskOutcome; reasons: RiskHardRule[] };
+
+/**
+ * Step 1 of checkout ("Check & buy"): creates (or reuses) the buyer's CREATED
+ * order for this listing and decides its risk, reusing a current decision
+ * rather than calling the classifier again. Returns the outcome and the
+ * buyer-safe reasons; a BLOCKED outcome has moved the order to BLOCKED.
+ */
+export async function assessCheckout(classify: Classify, buyerId: string, listingId: unknown): Promise<CheckoutAssessment> {
+  const listing = await buyableListing(buyerId, listingId);
+  // A block sticks, so retrying can't re-roll the classifier.
+  const status = await buyerRiskStatus(buyerId, listing.id);
+  if (status.outcome === "BLOCKED") return { outcome: "BLOCKED", reasons: status.reasons };
+
   const order =
-    existing ??
+    (await openOrder(buyerId, listing)) ??
     (await prisma.order.create({
       data: {
         listingId: listing.id,
@@ -115,10 +143,10 @@ export async function startCheckout(paypal: PayPalClient, classify: Classify, bu
         platformFeeCents: platformFeeCents(listing.priceCents),
         currency: listing.currency,
       },
-      select: { id: true, paypalOrderId: true },
+      select: { id: true },
     }));
 
-  let outcome;
+  let outcome: RiskOutcome;
   try {
     outcome = await assessOrderRisk(order.id, { classify });
   } catch (err) {
@@ -126,10 +154,27 @@ export async function startCheckout(paypal: PayPalClient, classify: Classify, bu
     if (err instanceof StaleOrderError) throw new CheckoutError(409, "ORDER_CLOSED", "This order can't be paid anymore");
     throw err;
   }
-  if (outcome === "BLOCKED") throw riskBlocked();
-  const riskWarning = outcome === "HOLD_WITH_WARNING";
   // Fixed ids for fixed labels: the classifier's own reasons stay internal.
-  const riskReasons = riskWarning ? await latestRiskReasons(prisma, order.id) : [];
+  return { outcome, reasons: await latestRiskReasons(prisma, order.id) };
+}
+
+/**
+ * Step 2 of checkout, from the PayPal Buttons' createOrder: creates the PayPal
+ * order for the buyer's assessed order. Never calls the classifier: it only
+ * accepts a current decision from assessCheckout (recent, with no chat or
+ * listing change since), and refuses with NOT_ASSESSED otherwise. Returns the
+ * PayPal order id and whether to warn the buyer.
+ */
+export async function startCheckout(paypal: PayPalClient, buyerId: string, listingId: unknown) {
+  const listing = await buyableListing(buyerId, listingId);
+  if (await isBlockedForBuyer(prisma, buyerId, listing.id)) throw riskBlocked();
+
+  const order = await openOrder(buyerId, listing);
+  const decision = order ? await currentRiskDecision(order) : null;
+  if (!order || !decision) throw notAssessed();
+  if (decision.outcome === "BLOCKED") throw riskBlocked();
+  const riskWarning = decision.outcome === "HOLD_WITH_WARNING";
+  const riskReasons = riskWarning ? reasonsFrom(decision.evidence) : [];
 
   if (order.paypalOrderId) return { orderId: order.id, paypalOrderId: order.paypalOrderId, riskWarning, riskReasons };
 
@@ -187,7 +232,7 @@ export async function authorizeCheckout(paypal: PayPalClient, buyerId: string, o
   const order = isUuid(orderId)
     ? await prisma.order.findUnique({
         where: { id: orderId },
-        select: { ...orderView, buyerId: true, paypalAuthorizationId: true },
+        select: { ...orderView, buyerId: true, sellerId: true, paypalAuthorizationId: true },
       })
     : null;
   // Someone else's order looks the same as a missing one.
@@ -203,9 +248,10 @@ export async function authorizeCheckout(paypal: PayPalClient, buyerId: string, o
   // No money is held without a decision: covers orders from before the risk engine,
   // and a second open order for this listing whose sibling got blocked.
   if (await isBlockedForBuyer(prisma, buyerId, order.listingId)) throw riskBlocked();
-  if (!(await latestRiskOutcome(prisma, order.id))) {
-    throw new CheckoutError(409, "NOT_ASSESSED", "Please start checkout again");
-  }
+  // Only against a decision that still matches the chat and listing, as for createOrder.
+  const decision = await currentRiskDecision(order);
+  if (!decision) throw notAssessed();
+  if (decision.outcome === "BLOCKED") throw riskBlocked();
 
   let authorization: Authorization;
   try {

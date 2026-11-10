@@ -14,8 +14,8 @@ import { applyRiskPolicy, type RiskOutcome } from "./policy.js";
 export type Classify = (input: RiskInput, budget: ClaudeBudget) => Promise<RiskClassification>;
 
 /**
- * Clicking Pay again reuses a decision this recent if nothing it read has
- * changed, since each new assessment makes the buyer wait for a paid LLM call.
+ * A decision this recent is reused (by a repeat check, and by checkout itself) if
+ * nothing it read has changed, since each new assessment is a paid LLM call.
  */
 export const DECISION_REUSE_MS = 60 * 60 * 1000;
 
@@ -35,10 +35,10 @@ export async function isBlockedForBuyer(db: Db, buyerId: string, listingId: stri
 }
 
 /**
- * The order's latest decision, if a Pay click would reuse it: it's recent and
- * neither the chat nor the listing has changed since.
+ * The order's latest decision, if checkout may still rely on it: it's recent and
+ * neither the chat nor the listing has changed since. Null means assess again.
  */
-async function currentDecision(order: { id: string; listingId: string; buyerId: string; sellerId: string }, now: Date) {
+export async function currentRiskDecision(order: { id: string; listingId: string; buyerId: string; sellerId: string }, now = new Date()) {
   const decision = await prisma.decision.findFirst({
     where: { orderId: order.id, kind: "RISK" },
     orderBy: { createdAt: "desc" },
@@ -54,7 +54,7 @@ async function currentDecision(order: { id: string; listingId: string; buyerId: 
 }
 
 /** The hard rules a buyer may see (fixed labels, see @campus/shared) from a decision's saved evidence. */
-function reasonsFrom(evidence: Prisma.JsonValue | null): RiskHardRule[] {
+export function reasonsFrom(evidence: Prisma.JsonValue | null): RiskHardRule[] {
   const hardRules = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence.hardRules : null;
   return buyerRiskReasons(hardRules);
 }
@@ -73,9 +73,9 @@ export type BuyerRiskStatus = { outcome: RiskOutcome | null; reasons: RiskHardRu
 
 /**
  * What the listing page shows this buyer before they pay. A block sticks (see
- * isBlockedForBuyer), so it's shown whatever happened since. A warning is shown
- * only while it still matches the chat and listing, i.e. while a Pay click would
- * reuse it; otherwise null, and the next Pay click assesses again.
+ * isBlockedForBuyer), so it's shown whatever happened since. Any other result is
+ * shown only while it still matches the chat and listing, i.e. while checkout
+ * would accept it; otherwise null, and the buyer has to check again.
  */
 export async function buyerRiskStatus(buyerId: string, listingId: string, now = new Date()): Promise<BuyerRiskStatus> {
   const blocked = await prisma.order.findFirst({
@@ -90,7 +90,7 @@ export async function buyerRiskStatus(buyerId: string, listingId: string, now = 
     orderBy: { createdAt: "desc" },
     select: { id: true, listingId: true, buyerId: true, sellerId: true },
   });
-  const decision = open ? await currentDecision(open, now) : null;
+  const decision = open ? await currentRiskDecision(open, now) : null;
   if (!decision) return { outcome: null, reasons: [] };
   return { outcome: decision.outcome as RiskOutcome, reasons: reasonsFrom(decision.evidence) };
 }
@@ -106,11 +106,11 @@ export async function assessOrderRisk(orderId: string, { classify, now = new Dat
     where: { id: orderId },
     select: { id: true, listingId: true, buyerId: true, sellerId: true, version: true },
   });
-  const reusable = await currentDecision(order, now);
+  const reusable = await currentRiskDecision(order, now);
   if (reusable) return reusable.outcome as RiskOutcome;
 
   const input = await loadRiskInput(prisma, orderId, now);
-  // Charged to the buyer, whose click on Pay caused the call.
+  // Charged to the buyer, whose "Check & buy" click caused the call.
   const classification = await classify(input, { userId: order.buyerId });
   const decision = applyRiskPolicy(input.features, classification);
 

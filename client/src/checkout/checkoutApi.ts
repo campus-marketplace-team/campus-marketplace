@@ -15,7 +15,10 @@ export type CheckoutOrder = {
   capturedAt: string | null
 }
 
-/** Creates (or reuses) my order for this listing and its PayPal order, unless the risk check blocks it. */
+/**
+ * Step 2, from the PayPal Buttons' createOrder: my order's PayPal order. Uses the check from
+ * assessCheckout; refused with NOT_ASSESSED if there's none or it's stale, RISK_BLOCKED if blocked.
+ */
 export function startCheckout(listingId: string) {
   return api<{ orderId: string; paypalOrderId: string; riskWarning: boolean; riskReasons: RiskHardRule[] }>('/api/orders', {
     method: 'POST',
@@ -26,9 +29,17 @@ export function startCheckout(listingId: string) {
 export type RiskOutcome = 'NORMAL' | 'HOLD_WITH_WARNING' | 'BLOCKED'
 export type RiskStatus = { outcome: RiskOutcome | null; reasons: RiskHardRule[] }
 
+/** Step 1, "Check & buy": runs (or reuses) the risk check on my order for this listing. */
+export function assessCheckout(listingId: string) {
+  return api<{ outcome: RiskOutcome; reasons: RiskHardRule[] }>('/api/orders/assess', {
+    method: 'POST',
+    body: { listingId },
+  })
+}
+
 /**
- * The risk result to show me on a listing before I pay. A block sticks; a warning is
- * null once the chat or listing changed since it was made (the next Pay click re-checks).
+ * The risk result for me on a listing. A block sticks; anything else is null once the
+ * chat or listing changed since it was made (I have to check again).
  */
 export function fetchRiskStatus(listingId: string, signal?: AbortSignal) {
   return api<RiskStatus>(`/api/orders/risk?listingId=${encodeURIComponent(listingId)}`, { signal })

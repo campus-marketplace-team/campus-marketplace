@@ -2,7 +2,7 @@ import express, { Router, type Response } from "express";
 import { LISTING_LIMITS } from "@campus/shared";
 import { requireAuth } from "../auth/middleware.js";
 import { getClientIp } from "../http/clientIp.js";
-import { authorizeCheckout, CheckoutError, startCheckout } from "../orders/checkout.js";
+import { assessCheckout, authorizeCheckout, CheckoutError, startCheckout } from "../orders/checkout.js";
 import { addDisputePhoto, openDispute } from "../orders/dispute.js";
 import { issueHandoffToken, redeemHandoffToken } from "../orders/handoff.js";
 import { getOrderStatus, listMyOrders } from "../orders/orderStatus.js";
@@ -11,8 +11,9 @@ import { buyerRiskStatus, type Classify } from "../risk/assess.js";
 import { isUuid } from "../ids.js";
 
 // Order endpoints. GET / and GET /:id back "My orders" and the order status
-// page. The PayPal Buttons in the client call POST / from
-// createOrder and POST /:id/authorize from onApprove. The QR handoff uses
+// page. "Check & buy" calls POST /assess; only then does the client render the
+// PayPal Buttons, which call POST / from createOrder and POST /:id/authorize
+// from onApprove. The QR handoff uses
 // POST /:id/handoff-token (seller) and POST /handoff/scan (buyer). PayPal
 // itself is only ever called from the server.
 
@@ -52,7 +53,7 @@ export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Clas
 
   // GET /api/orders/risk?listingId=  (a would-be buyer) — the risk result to show on the listing
   // page: { outcome: NORMAL | HOLD_WITH_WARNING | BLOCKED | null, reasons }. null means not
-  // assessed, or the chat or listing changed since, so the next Pay click assesses again.
+  // assessed, or the chat or listing changed since, so the buyer has to check again.
   router.get("/risk", (req, res) =>
     respond(res, async () => {
       const { listingId } = req.query;
@@ -66,9 +67,15 @@ export function createOrdersRouter(getPayPal: () => PayPalClient, classify: Clas
     respond(res, async () => ({ order: await getOrderStatus(req.user!.id, req.params.id) })),
   );
 
-  // POST /api/orders  { listingId }  (buyer) — assesses risk and starts checkout, returns
-  // { orderId, paypalOrderId, riskWarning, riskReasons }, or 403 RISK_BLOCKED.
-  router.post("/", (req, res) => handle(res, (paypal) => startCheckout(paypal, classify, req.user!.id, req.body?.listingId), 201));
+  // POST /api/orders/assess  { listingId }  (buyer) — "Check & buy": runs (or reuses) the risk
+  // check. Returns { outcome: NORMAL | HOLD_WITH_WARNING | BLOCKED, reasons }, reasons being
+  // fixed hard-rule ids (see BUYER_RISK_REASON_LABELS). Rate limited apart from checkout.
+  router.post("/assess", (req, res) => respond(res, () => assessCheckout(classify, req.user!.id, req.body?.listingId)));
+
+  // POST /api/orders  { listingId }  (buyer) — creates the PayPal order against the current
+  // decision from /assess, never a new one. Returns { orderId, paypalOrderId, riskWarning,
+  // riskReasons }, 403 RISK_BLOCKED, or 409 NOT_ASSESSED (check again first).
+  router.post("/", (req, res) => handle(res, (paypal) => startCheckout(paypal, req.user!.id, req.body?.listingId), 201));
 
   // POST /api/orders/:id/authorize  (the order's buyer) — after PayPal approval. Returns { order }.
   router.post("/:id/authorize", (req, res) =>
