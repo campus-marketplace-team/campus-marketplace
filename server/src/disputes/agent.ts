@@ -6,6 +6,7 @@ import type { PayPalClient } from "../paypal/client.js";
 import { computeRiskFeatures, findInjectionPhrases } from "../risk/features.js";
 import { DISPUTE_ACTION_TOOLS, runDisputeActionTool } from "./actionTools.js";
 import { callDisputeAgentClaude, leaveDisputeForAdmin } from "./agentClaude.js";
+import { escalationReasoning, type WordedEscalationCause } from "./escalationText.js";
 import { DISPUTE_READ_TOOLS, runDisputeReadTool } from "./readTools.js";
 
 // The dispute agent's loop (see CLAUDE.md "AI"): reads the evidence on one order
@@ -78,21 +79,23 @@ export type DisputeAgentOptions = {
   deadlineMs?: number;
 };
 
-const CAUSE_TEXT: Record<Exclude<DisputeAgentLeftCause, "budget">, string> = {
-  injection_detected: "text in the report, listing or chat matched our prompt-injection rules, so the agent wasn't run on it",
+// api_error and injection_detected use the shared wording in escalationText.ts instead.
+const CAUSE_TEXT: Record<Exclude<DisputeAgentLeftCause, WordedEscalationCause>, string> = {
   no_decision: "it finished without proposing a decision",
   refusal: "the model declined the request",
   truncated: "its answer was cut off",
   turn_limit: "it didn't reach a decision within its limit of requests",
   time_limit: "it didn't reach a decision in time",
   input_too_large: "the evidence was too large to send",
-  api_error: "a call to the Claude API failed",
   action_failed: "its decision couldn't be carried out, as recorded on that decision",
   reopened: "an earlier decision on it was rejected or couldn't be carried out, and the agent only gets one run per dispute",
   internal_error: "of an internal error",
 };
 
-const leftReasoning = (cause: keyof typeof CAUSE_TEXT) => `The automated dispute agent didn't settle this dispute because ${CAUSE_TEXT[cause]}, so it needs an admin's decision.`;
+function leftReasoning(cause: Exclude<DisputeAgentLeftCause, "budget">): string {
+  if (cause === "api_error" || cause === "injection_detected") return escalationReasoning(cause);
+  return `The automated dispute agent didn't settle this dispute because ${CAUSE_TEXT[cause]}, so it needs an admin's decision.`;
+}
 
 function causeOfError(err: unknown): "input_too_large" | "api_error" | "internal_error" {
   if (err instanceof ClaudeInputTooLargeError) return "input_too_large";

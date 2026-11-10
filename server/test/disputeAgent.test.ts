@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { approveDisputeDecision, rejectDisputeDecision } from "../src/disputes/actionTools.js";
 import { AGENT_RUN_DEADLINE_MS, handleDisputeNeedsDecision, MAX_AGENT_TURNS, runDisputeAgent, type DisputeAgentOptions } from "../src/disputes/agent.js";
+import { escalationReasoning } from "../src/disputes/escalationText.js";
 import { postTransaction } from "../src/ledger/postTransaction.js";
 import { openDispute } from "../src/orders/dispute.js";
 import { DISPUTE_NEEDS_DECISION, DISPUTE_PHOTO_GRACE_MS, outboxHandlers, SLOW_OUTBOX_TOPICS } from "../src/outbox/handlers.js";
@@ -102,6 +103,7 @@ async function expectLeftForAdmin(orderId: string, cause: string, result: unknow
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ outcome: "ESCALATE", actionStatus: "EXECUTED", model: null, llmOutput: null });
   expect(rows[0].reasoning).toBeTruthy();
+  if (cause === "api_error" || cause === "budget" || cause === "injection_detected") expect(rows[0].reasoning).toBe(escalationReasoning(cause));
 }
 
 describe("a run that reaches a decision", () => {

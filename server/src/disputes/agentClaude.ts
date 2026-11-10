@@ -3,6 +3,7 @@ import { callClaude, type ClaudeBudget, ClaudeBudgetExceededError, ClaudeBudgetU
 import { CheckoutError } from "../orders/checkout.js";
 import type { PayPalClient } from "../paypal/client.js";
 import { proposeDisputeAction } from "./actionTools.js";
+import { escalationReasoning } from "./escalationText.js";
 
 // How the dispute agent calls Claude. When the budget stops a call, the dispute goes
 // to an admin with the payment still on hold, rather than waiting on an agent that
@@ -10,7 +11,7 @@ import { proposeDisputeAction } from "./actionTools.js";
 
 export type DisputeAgentCallResult = { status: "answered"; response: Anthropic.Beta.Messages.BetaMessage } | { status: "left_for_admin" };
 
-const OUT_OF_BUDGET_REASONING = "The automated dispute agent couldn't run because the Claude API budget was used up, so this dispute needs an admin's decision. No evidence was assessed.";
+const OUT_OF_BUDGET_REASONING = escalationReasoning("budget");
 
 /** Records that the agent didn't decide, and passes the dispute to a person with the payment still on hold. */
 export async function leaveDisputeForAdmin(paypal: PayPalClient, orderId: string, reasoning: string) {

@@ -2,6 +2,7 @@ import { ORDER_STATES, type OrderState } from "@campus/shared";
 import { z } from "zod";
 import { getClaudeUsage } from "../ai/claude.js";
 import { prisma } from "../db.js";
+import { displayDisputeReasoning } from "../disputes/escalationText.js";
 import { findOffPlatformPhrases, type OffPlatformPhrase } from "../risk/features.js";
 
 // Data for the admin dashboard (client/src/pages/admin). Read-only. Money is
@@ -217,6 +218,8 @@ async function getDecisionRecords() {
     },
     disputeDecisions: disputes.map(({ order, approver, evidence, llmOutput, ...d }) => ({
       ...d,
+      // Stored rows are never edited: an escalation's reason is reworded only here, for display.
+      reasoning: displayDisputeReasoning({ outcome: d.outcome, reasoning: d.reasoning, llmOutput }),
       ...flattenDecisionOrder(order),
       // The agent's decisions always save its tool input; an admin's own never have one.
       proposedByAgent: llmOutput !== null,
