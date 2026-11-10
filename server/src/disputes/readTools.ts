@@ -4,6 +4,7 @@ import type { Db } from "../db.js";
 import { isUuid } from "../ids.js";
 import { encodeForPrompt, MAX_CHAT_MESSAGES } from "../risk/classifier.js";
 import { orderChatWhere } from "../risk/features.js";
+import { loadDisputePhoto, type PhotoLoader } from "./photos.js";
 
 // The dispute agent's read tools (see CLAUDE.md "AI"): the evidence it can look
 // at for one disputed order. Nothing here writes.
@@ -182,7 +183,11 @@ export async function getDisputeChatHistory(db: Db, orderId: string, { beforeMes
   };
 }
 
-/** Public URLs of the photos in the buyer's report and on the listing. Listings are locked once reserved, so these show what was sold. */
+/**
+ * Stored URLs of the photos in the buyer's report and on the listing: Supabase public
+ * URLs, or web-app paths for seed listings. Listings are locked once reserved, so these
+ * show what was sold. The get_photos tool loads them (photos.ts).
+ */
 export async function getDisputePhotos(db: Db, orderId: string) {
   const dispute = isUuid(orderId)
     ? await db.dispute.findUnique({
@@ -325,14 +330,32 @@ function parseInput<T>(schema: z.ZodType<T>, input: unknown): T {
   return result.data;
 }
 
-function photoBlocks(label: string, urls: string[]): Anthropic.Beta.Messages.BetaToolResultContentBlockParam[] {
-  return urls.flatMap((url, i) => [
-    { type: "text" as const, text: `${label} ${i + 1} of ${urls.length}:` },
-    { type: "image" as const, source: { type: "url" as const, url } },
-  ]);
+type ResultBlock = Anthropic.Beta.Messages.BetaToolResultContentBlockParam;
+
+/**
+ * One labeled image block per photo that loads, sent as base64. A photo that can't be
+ * loaded is skipped with a note saying so, rather than failing the whole request, and
+ * a section with no photos says that too.
+ */
+async function photoBlocks(orderId: string, label: string, none: string, urls: string[], loadPhoto: PhotoLoader): Promise<ResultBlock[]> {
+  if (urls.length === 0) return [{ type: "text", text: none }];
+  const photos = await Promise.all(urls.map((url) => loadPhoto(url)));
+  return photos.flatMap((photo, i): ResultBlock[] => {
+    const name = `${label} ${i + 1} of ${urls.length}`;
+    if (!photo.ok) {
+      console.warn(`[dispute-agent] order ${orderId}: skipped ${name.toLowerCase()} (${photo.reason})`);
+      return [{ type: "text", text: `${name} couldn't be loaded and isn't shown (${photo.reason}).` }];
+    }
+    return [
+      { type: "text", text: `${name}:` },
+      { type: "image", source: { type: "base64", media_type: photo.mediaType, data: photo.data } },
+    ];
+  });
 }
 
-async function readTool(db: Db, orderId: string, name: string, input: unknown, now: Date): Promise<DisputeToolResult["content"]> {
+export type ReadToolOptions = { loadPhoto?: PhotoLoader };
+
+async function readTool(db: Db, orderId: string, name: string, input: unknown, now: Date, { loadPhoto = loadDisputePhoto }: ReadToolOptions): Promise<DisputeToolResult["content"]> {
   // Checked per tool, so the model gets told about input a tool doesn't take.
   switch (name as DisputeReadToolName) {
     case "get_order":
@@ -343,10 +366,14 @@ async function readTool(db: Db, orderId: string, name: string, input: unknown, n
     case "get_photos": {
       parseInput(noInputSchema, input);
       const { disputePhotoUrls, listingPhotoUrls } = await getDisputePhotos(db, orderId);
+      const [reportBlocks, listingBlocks] = await Promise.all([
+        photoBlocks(orderId, "Photo from the buyer's report", "No photos attached to the buyer's report.", disputePhotoUrls, loadPhoto),
+        photoBlocks(orderId, "Photo from the seller's listing", "No photos on the seller's listing.", listingPhotoUrls, loadPhoto),
+      ]);
       return [
         { type: "text", text: encodeForPrompt({ facts: { disputePhotos: disputePhotoUrls.length, listingPhotos: listingPhotoUrls.length } }) },
-        ...photoBlocks("Photo from the buyer's report", disputePhotoUrls),
-        ...photoBlocks("Photo from the seller's listing", listingPhotoUrls),
+        ...reportBlocks,
+        ...listingBlocks,
       ];
     }
     case "get_qr_scan_log":
@@ -366,9 +393,9 @@ async function readTool(db: Db, orderId: string, name: string, input: unknown, n
  * `is_error` result the model can recover from. Throws DisputeNotFoundError if the
  * order has no dispute, and passes on database errors.
  */
-export async function runDisputeReadTool(db: Db, orderId: string, name: string, input: unknown, now = new Date()): Promise<DisputeToolResult> {
+export async function runDisputeReadTool(db: Db, orderId: string, name: string, input: unknown, now = new Date(), options: ReadToolOptions = {}): Promise<DisputeToolResult> {
   try {
-    return { content: await readTool(db, orderId, name, input, now) };
+    return { content: await readTool(db, orderId, name, input, now, options) };
   } catch (err) {
     if (err instanceof InvalidToolInputError) return { content: err.message, is_error: true };
     throw err;

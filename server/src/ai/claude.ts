@@ -151,7 +151,32 @@ const createWithClaude: CreateMessage = (params, options) => {
   return client.beta.messages.create(params, options);
 };
 
-const textChars = (content: unknown) => (typeof content === "string" ? content.length : JSON.stringify(content ?? "").length);
+// Image data isn't text and is billed by image size, not length, so it's left out:
+// one base64 photo is longer than the whole text cap. Photos are capped where they're loaded.
+const withoutImageData = (_key: string, value: unknown) =>
+  value && typeof value === "object" && (value as { type?: unknown }).type === "base64" ? { type: "base64" } : value;
+
+const textChars = (content: unknown) => (typeof content === "string" ? content.length : JSON.stringify(content ?? "", withoutImageData).length);
+
+/**
+ * For logs: the error's class and status and, for an API error, the type and message
+ * from the response body (e.g. "invalid_request_error: ..."), which say what was wrong.
+ * Never the request itself or the key: the SDK's own message for an API error embeds
+ * the whole body, so only those two fields are taken from it.
+ */
+export function describeClaudeError(err: unknown): string {
+  if (err instanceof Anthropic.APIError) {
+    // The SDK leaves `name` as "Error", so the class says which error it is.
+    const where = `${err.constructor.name} (status ${err.status ?? "none"}${err.requestID ? `, request ${err.requestID}` : ""})`;
+    const body = (err.error as { error?: { type?: unknown; message?: unknown } } | undefined)?.error;
+    const type = typeof body?.type === "string" ? body.type : null;
+    const message = typeof body?.message === "string" ? body.message.slice(0, 300) : null;
+    // No body (connection errors, timeouts): the SDK's message is its own, like "Request timed out."
+    if (err.status === undefined) return `${where}: ${err.message.slice(0, 200)}`;
+    return type || message ? `${where}: ${[type, message].filter(Boolean).join(": ")}` : where;
+  }
+  return err instanceof Error ? `${err.name}: ${err.message.slice(0, 200)}` : "unknown error";
+}
 
 function inputChars({ system, messages }: ClaudeParams) {
   return messages.reduce((total, message) => total + textChars(message.content), textChars(system));
@@ -183,5 +208,10 @@ export async function callClaude(
     }
     if (exceeded) throw new ClaudeBudgetExceededError(exceeded);
   }
-  return createMessage({ ...params, max_tokens: CLAUDE_CALL_CAPS[site].maxTokens }, options);
+  try {
+    return await createMessage({ ...params, max_tokens: CLAUDE_CALL_CAPS[site].maxTokens }, options);
+  } catch (err) {
+    console.error(`[claude] ${site} call failed: ${describeClaudeError(err)}`);
+    throw err;
+  }
 }

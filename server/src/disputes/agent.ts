@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { type ClaudeBudget, ClaudeInputTooLargeError, type CreateMessage } from "../ai/claude.js";
+import { type ClaudeBudget, ClaudeInputTooLargeError, type CreateMessage, describeClaudeError } from "../ai/claude.js";
 import { prisma } from "../db.js";
 import { isUuid } from "../ids.js";
 import type { PayPalClient } from "../paypal/client.js";
@@ -93,12 +93,6 @@ const CAUSE_TEXT: Record<Exclude<DisputeAgentLeftCause, "budget">, string> = {
 };
 
 const leftReasoning = (cause: keyof typeof CAUSE_TEXT) => `The automated dispute agent didn't settle this dispute because ${CAUSE_TEXT[cause]}, so it needs an admin's decision.`;
-
-/** Error class and status only: an API error message can echo the request. */
-function describeError(err: unknown) {
-  if (err instanceof Anthropic.APIError) return `${err.name} (status ${err.status ?? "none"})`;
-  return err instanceof Error ? err.name : "unknown error";
-}
 
 function causeOfError(err: unknown): "input_too_large" | "api_error" | "internal_error" {
   if (err instanceof ClaudeInputTooLargeError) return "input_too_large";
@@ -223,7 +217,7 @@ export async function runDisputeAgent(paypal: PayPalClient, orderId: string, opt
     if (outcome === "budget") return { status: "left_for_admin", cause: outcome, toolsCalled };
     return await leave(outcome);
   } catch (err) {
-    console.error(`[dispute-agent] run failed on order ${orderId}: ${describeError(err)}`);
+    console.error(`[dispute-agent] run failed on order ${orderId}: ${describeClaudeError(err)}`);
     return leave(causeOfError(err));
   }
 }

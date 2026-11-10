@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { PhotoLoader } from "../src/disputes/photos.js";
 import {
   DISPUTE_READ_TOOLS,
   DisputeNotFoundError,
@@ -173,25 +174,54 @@ describe("get_chat_history", () => {
 });
 
 describe("get_photos", () => {
-  it("returns each photo as an image block, labeled by where it came from", async () => {
-    const order = await createOrder();
-    const { content } = await run(order.id, "get_photos");
+  // Stands in for the real loader (photos.ts, tested in disputePhotos.test.ts): the data is the URL, so the test can see which photo went where.
+  const loadPhoto: PhotoLoader = async (url) => (url.endsWith("/2.png") ? { ok: false, reason: "download failed (HTTP 404)" } : { ok: true, mediaType: "image/png", data: btoa(url) });
+  const runPhotos = (orderId: string) => runDisputeReadTool(prisma, orderId, "get_photos", {}, NOW, { loadPhoto });
+  const image = (url: string) => ({ type: "image", source: { type: "base64", media_type: "image/png", data: btoa(url) } });
 
+  beforeAll(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("sends each photo as a base64 image block, labeled by where it came from, and notes one that couldn't be loaded", async () => {
+    const order = await createOrder();
+    const { content, is_error } = await runPhotos(order.id);
+
+    expect(is_error).toBeUndefined();
     expect(content).toEqual([
       { type: "text", text: JSON.stringify({ facts: { disputePhotos: 2, listingPhotos: 1 } }) },
       { type: "text", text: "Photo from the buyer's report 1 of 2:" },
-      { type: "image", source: { type: "url", url: "https://storage.test/disputes/1.png" } },
-      { type: "text", text: "Photo from the buyer's report 2 of 2:" },
-      { type: "image", source: { type: "url", url: "https://storage.test/disputes/2.png" } },
+      image("https://storage.test/disputes/1.png"),
+      { type: "text", text: "Photo from the buyer's report 2 of 2 couldn't be loaded and isn't shown (download failed (HTTP 404))." },
       { type: "text", text: "Photo from the seller's listing 1 of 1:" },
-      { type: "image", source: { type: "url", url: "https://storage.test/listings/1.png" } },
+      image("https://storage.test/listings/1.png"),
     ]);
   });
 
-  it("copes with no photos (photo_urls can be NULL in the database)", async () => {
+  it("says so when there are no photos, instead of returning nothing (photo_urls can be NULL in the database)", async () => {
     const order = await createOrder();
     await prisma.$executeRaw`UPDATE disputes SET photo_urls = NULL WHERE order_id = ${order.id}::uuid`;
+    await prisma.listing.update({ where: { id: order.listingId }, data: { photoUrls: [] } });
     expect((await getDisputePhotos(prisma, order.id)).disputePhotoUrls).toEqual([]);
+
+    const { content } = await runPhotos(order.id);
+    expect(content).toEqual([
+      { type: "text", text: JSON.stringify({ facts: { disputePhotos: 0, listingPhotos: 0 } }) },
+      { type: "text", text: "No photos attached to the buyer's report." },
+      { type: "text", text: "No photos on the seller's listing." },
+    ]);
+  });
+
+  it("with the real loader, skips a URL this app didn't store, without fetching it", async () => {
+    const order = await createOrder();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { content, is_error } = await run(order.id, "get_photos");
+
+    expect(is_error).toBeUndefined();
+    expect((content as { type: string }[]).filter((block) => block.type === "image")).toHaveLength(0);
+    expect(JSON.stringify(content)).toContain("couldn't be loaded and isn't shown (not stored by this app)");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 

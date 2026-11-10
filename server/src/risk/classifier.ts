@@ -1,7 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { LISTING_LIMITS } from "@campus/shared";
 import { z } from "zod";
-import { callClaude, CLAUDE_CALL_CAPS, type ClaudeBudget, ClaudeBudgetExceededError, ClaudeBudgetUnavailableError, type CreateMessage } from "../ai/claude.js";
+import {
+  callClaude,
+  CLAUDE_CALL_CAPS,
+  type ClaudeBudget,
+  ClaudeBudgetExceededError,
+  ClaudeBudgetUnavailableError,
+  type CreateMessage,
+  describeClaudeError,
+} from "../ai/claude.js";
 import type { Db } from "../db.js";
 import { computeRiskFeatures, orderChatWhere, type RiskFeatures } from "./features.js";
 
@@ -187,11 +195,6 @@ function fallback(fallbackReason: RiskFallbackReason, detail: string, model: str
   };
 }
 
-function describeError(err: unknown): string {
-  if (err instanceof Anthropic.APIError) return `${err.name} (status ${err.status ?? "none"}): ${err.message.slice(0, 200)}`;
-  return err instanceof Error ? `${err.name}: ${err.message.slice(0, 200)}` : "unknown error";
-}
-
 /**
  * Asks Claude to classify an order. Never throws: API errors, refusals, output
  * that fails validation and a used-up budget all come back as medium risk, with
@@ -218,7 +221,8 @@ export async function classifyRisk(input: RiskInput, { budget, createMessage }: 
   } catch (err) {
     if (err instanceof ClaudeBudgetExceededError) return fallback("budget_exceeded", err.scope, RISK_MODEL, null);
     if (err instanceof ClaudeBudgetUnavailableError) return fallback("budget_unavailable", err.message, RISK_MODEL, null);
-    return fallback("llm_error", describeError(err), RISK_MODEL, null);
+    // callClaude has already logged it.
+    return fallback("llm_error", describeClaudeError(err), RISK_MODEL, null);
   }
 
   const model = response.model;
