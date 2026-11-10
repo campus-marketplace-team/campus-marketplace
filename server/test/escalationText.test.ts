@@ -7,8 +7,11 @@ const FIRST = "Claude couldn't reach a decision on this dispute, so it was escal
 const saved = (reasoning: string | null) => ({ outcome: "ESCALATE", reasoning, llmOutput: null });
 
 describe("escalationReasoning", () => {
+  it("words api_error without mentioning the API", () => {
+    expect(escalationReasoning("api_error")).toBe("Claude wasn't able to come up with a solution for this dispute, so it has been escalated to a person.");
+  });
+
   it.each([
-    ["api_error", "the AI service returned an error"],
     ["budget", "today's AI usage limit was reached"],
     ["injection_detected", "the report or chat contained text aimed at the AI"],
   ] as const)("words %s", (cause, reason) => {

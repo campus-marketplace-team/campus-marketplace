@@ -8,16 +8,21 @@ export type WordedEscalationCause = "api_error" | "budget" | "injection_detected
 
 const FIRST_SENTENCE = "Claude couldn't reach a decision on this dispute, so it was escalated to a person.";
 
-const REASON_TEXT: Record<WordedEscalationCause, string> = {
-  api_error: "the AI service returned an error",
+/** A failed API call gives no reason worth showing an admin, so it gets no "(Reason: ...)". */
+const API_ERROR_TEXT = "Claude wasn't able to come up with a solution for this dispute, so it has been escalated to a person.";
+
+const REASON_TEXT: Record<Exclude<WordedEscalationCause, "api_error">, string> = {
   budget: "today's AI usage limit was reached",
   injection_detected: "the report or chat contained text aimed at the AI",
 };
 
 /** The reasoning saved on a new escalation with one of these causes. */
 export function escalationReasoning(cause: WordedEscalationCause): string {
+  if (cause === "api_error") return API_ERROR_TEXT;
   return `${FIRST_SENTENCE} (Reason: ${REASON_TEXT[cause]}.)`;
 }
+
+const WORDED_CAUSES: readonly WordedEscalationCause[] = ["api_error", "budget", "injection_detected"];
 
 /** What escalations with these causes were saved with before this wording, exactly. */
 const LEGACY_REASONING: Record<WordedEscalationCause, string> = {
@@ -28,7 +33,7 @@ const LEGACY_REASONING: Record<WordedEscalationCause, string> = {
 };
 
 const CAUSE_BY_STORED_TEXT = new Map<string, WordedEscalationCause>(
-  (Object.keys(REASON_TEXT) as WordedEscalationCause[]).flatMap((cause) => [
+  WORDED_CAUSES.flatMap((cause) => [
     [LEGACY_REASONING[cause], cause],
     [escalationReasoning(cause), cause],
   ]),
