@@ -197,9 +197,9 @@ Goal: a judge understands the project in 3 minutes and can try it themselves.
 - [x] **5.5b Messages inbox + unread badge** (server/src/routes/chat.ts: GET /api/chats/unread-count, POST /api/chats/:listingId/read { messageId, buyerId? } (marks read up to that message, only moves forward), `unread` on GET /api/chats. New rate-limit bucket chatUnread (120 / 15 min per user) so the badge poll stays out of general and chat. Client: /messages in client/src/pages/messages/, nav badge via client/src/chat/UnreadProvider.tsx (30 s poll + focus, 10 s min gap), ChatPanel marks read and opens ?buyer=<id>#chat. Migration 20261109120000_add_chat_reads (chat_reads table, RLS on, existing conversations backfilled as read), applied. Tests in server/test/chatInbox.test.ts + rateLimit.test.ts; smoke check for unread-count. No new env vars.)
   > Read CLAUDE.md. Add a "Messages" link in the top nav (between "My stuff" and the login/profile area) with a badge showing the number of unread conversations (hidden at 0, "9+" above 9). Add a /messages page listing every conversation the user is in, newest activity first: listing photo and title, the other person's name, a one-line preview of the last message, a relative time, and bold text plus a dot when unread. Clicking a row opens the existing chat UI and marks the conversation as read. Empty state links to Browse. Reuse the chat models and API; track read state per user per conversation with a small additive migration (RLS on). Add a lightweight unread-count endpoint, polled every ~30 s and on tab focus, without hitting the chat rate limits. A user only ever sees their own conversations; test that, unread counts and mark-as-read. Match Browse's design and work at mobile width. Don't touch payment, risk or dispute code. When done, tick task 5.5b in TASKS.md.
 
-- [ ] **5.6 Demo video** (manual)
-- [ ] **5.7 Devpost page** (together): problem, how escrow works, AI safety design, eval results, failure handling
-- [ ] **5.8 Full dry run** (manual, together): deployed app from a fresh browser
-- [ ] **5.9 Submit** 🚀
+- [x] **5.6 Demo video** (manual; recorded Nov 10)
+- [x] **5.7 Devpost page** (together): problem, how escrow works, AI safety design, eval results, failure handling (done Nov 10)
+- [x] **5.8 Full dry run** (manual, together): deployed app from a fresh browser (done Nov 10; smoke suite passing)
+- [x] **5.9 Submit** 🚀 (submitted on Devpost Nov 10)
 
 **Done when:** Devpost shows submitted, the video is public, and the deployed demo works with the test accounts in the README.

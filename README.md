@@ -23,8 +23,8 @@ Campus Marketplace keeps the money on hold until both people are physically in t
 ## How it works
 
 1. **Sign up with a school email.** Only allowed school domains (e.g. `mcmaster.ca`) can register.
-2. **Browse and chat.** Filter listings by category and price, open a listing, and message the seller.
-3. **Risk check.** At checkout, the risk engine scores the order. Low risk goes ahead normally, medium risk gets a warning and a longer hold, and high risk is blocked before PayPal is ever called.
+2. **Browse and chat.** Filter listings by category and price, open a listing, and message the seller. Every conversation shows up under **Messages**, with a badge in the top nav for unread ones.
+3. **Risk check.** At checkout, the buyer clicks **Check & buy** and the risk engine scores the order before the PayPal buttons appear. Low risk goes ahead normally, medium risk gets a warning and a longer hold, and high risk is blocked before PayPal is ever called.
 4. **Pay with PayPal (authorize, don't capture).** The buyer approves with PayPal Buttons. The order is created with `intent: AUTHORIZE`, so the funds are held on the buyer's account, not taken, and the order gets a 72-hour handoff deadline.
 5. **Meet up and scan.** The seller opens a QR code on their order page: a signed, single-use token bound to the order and seller that expires after 5 minutes. The buyer scans it from their own logged-in session.
 6. **Capture and payout.** The server verifies the token, captures the payment through PayPal, and the worker pays the seller through PayPal Payouts, minus a 10% platform fee. Every scan attempt is logged as evidence.
@@ -123,7 +123,7 @@ Payments use the PayPal **sandbox**, so no real money moves. When the PayPal pop
 
 Use two browsers (or a normal and a private window): log in as the seller in one and the buyer in the other.
 
-1. The buyer opens one of the seller's listings, chats if they like, and clicks **Pay with PayPal**.
+1. The buyer opens one of the seller's listings, chats if they like, and clicks **Check & buy**. After the safety check passes, the PayPal buttons appear: pay with the sandbox account. (A medium-risk result shows a warning to acknowledge first.)
 2. The seller opens the order from **My stuff** and shows the QR code.
 3. The buyer opens the same order and scans the QR code with their phone or webcam. The payment is captured, and within a couple of minutes the seller is paid out.
 
@@ -164,7 +164,7 @@ Set up the database and storage, then seed it:
 ```bash
 npm run migrate:deploy -w server  # apply migrations
 npm run storage:setup -w server   # create the listing-photos bucket (needs the SUPABASE_* vars)
-npm run seed -w server            # 5 seed users and 20 listings (safe to re-run)
+npm run seed -w server            # 5 seed users and 21 listings (safe to re-run)
 npm run admin:grant -w server -- seed.alex.chen@mcmaster.ca   # make Alex an admin
 npm run paypal:token -w server    # optional: checks your PayPal sandbox keys work
 ```
@@ -215,7 +215,7 @@ Names only; see each `.env.example` for details. Never commit real values.
 | `ANTHROPIC_API_KEY` | Claude API key for the risk classifier and dispute agent |
 | `CLAUDE_BUDGET_CALLS_PER_DAY`, `CLAUDE_BUDGET_CALLS_PER_USER_PER_DAY` | Optional: lower the Claude budget (can't raise it above 300 / 20) |
 | `PIXABAY_API_KEY` | Only for the seed photo fetcher script |
-| `DEMO_SELLER_PAYPAL_EMAIL` | Only for `seed:demo`: sandbox personal account that receives the demo sale's payout |
+| `DEMO_SELLER_PAYPAL_EMAIL` | Only for `seed` and `seed:demo`: sandbox personal account that receives seller payouts for the seed users and the demo sale |
 
 **`client/.env`**
 
